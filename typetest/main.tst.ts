@@ -53,6 +53,10 @@ describe("fromEffect", () => {
     expect<EventFromLogic<typeof logic>>().type.toBe<
       EffectActorEvent<number, never>
     >();
+    expect<EventFromLogic<typeof logic>>().type.not.toBeAssignableTo<{
+      readonly type: "effect.success";
+      readonly value: number;
+    }>();
     expect<EmittedFrom<typeof logic>>().type.toBe<{
       readonly type: "quote.calculated";
       readonly total: number;
@@ -112,6 +116,10 @@ describe("fromStream", () => {
     expect<EventFromLogic<typeof logic>>().type.toBe<
       StreamActorEvent<number, never>
     >();
+    expect<EventFromLogic<typeof logic>>().type.not.toBeAssignableTo<{
+      readonly type: "stream.next";
+      readonly value: number;
+    }>();
     expect<EmittedFrom<typeof logic>>().type.toBe<{
       readonly type: "stream.item";
       readonly value: number;
@@ -143,11 +151,14 @@ describe("fromAtom", () => {
       AtomActorEvent<number, number>
     >();
     expect<EventFromLogic<typeof logic>>().type.toBeAssignableTo<
-      | { readonly type: "atom.changed"; readonly value: number }
       | { readonly type: "atom.refresh" }
       | { readonly type: "atom.set"; readonly value: number }
       | { readonly type: "xstate.stop" }
     >();
+    expect<EventFromLogic<typeof logic>>().type.not.toBeAssignableTo<{
+      readonly type: "atom.changed";
+      readonly value: number;
+    }>();
   });
 
   it("turns read-only Atoms into actor logic without set payloads", () => {

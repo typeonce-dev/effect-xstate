@@ -20,10 +20,11 @@ export type AtomStopEvent = {
 };
 
 export type AtomActorEvent<A, W = never> =
-  | AtomChangedEvent<A>
   | AtomRefreshEvent
   | AtomSetEvent<W>
   | AtomStopEvent;
+
+type AtomInternalEvent<A, W> = AtomChangedEvent<A> | AtomActorEvent<A, W>;
 
 export type AtomActorSnapshot<A> =
   | {
@@ -90,7 +91,7 @@ export function fromAtom<A, W = never>(
 ): ActorLogic<AtomActorSnapshot<A>, AtomActorEvent<A, W>, void> {
   const registry = config.registry ?? AtomRegistry.make();
   return {
-    transition: (snapshot, event, actorScope) => {
+    transition: (snapshot, event: AtomInternalEvent<A, W>, actorScope) => {
       if (event.type === "atom.changed") {
         if (snapshot.status !== "active") {
           return snapshot;
@@ -123,12 +124,16 @@ export function fromAtom<A, W = never>(
       const unsubscribe = registry.subscribe(
         config.atom,
         (value) => {
-          actorScope.self.send({
+          (
+            actorScope.self as unknown as {
+              send: (event: AtomChangedEvent<A>) => void;
+            }
+          ).send({
             type: "atom.changed",
             value,
           });
         },
-        { immediate: false }
+        { immediate: true }
       );
       subscriptions.set(actorScope.self, unsubscribe);
     },

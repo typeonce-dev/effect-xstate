@@ -5,7 +5,7 @@ import {
   fromEffect,
   persistedAtom,
   selectAtom,
-} from "@effect/xstate";
+} from "../../../src/main";
 import { Effect } from "effect";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { assign, emit, setup } from "xstate";

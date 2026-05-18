@@ -11,9 +11,6 @@ importers:
       '@effect/atom-react':
         specifier: 4.0.0-beta.64
         version: 4.0.0-beta.64(effect@4.0.0-beta.64)(react@19.2.5)(scheduler@0.27.0)
-      '@effect/xstate':
-        specifier: file:../..
-        version: file:../..(effect@4.0.0-beta.64)(xstate@5.31.1)
       effect:
         specifier: 4.0.0-beta.64
         version: 4.0.0-beta.64
@@ -294,12 +291,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@effect/xstate@file:../..':
-    resolution: {directory: ../.., type: directory}
-    peerDependencies:
-      effect: 4.0.0-beta.64
-      xstate: ^5.19.2
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3':
     resolution: {integrity: sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw==}
@@ -912,11 +903,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  '@effect/xstate@file:../..(effect@4.0.0-beta.64)(xstate@5.31.1)':
-    dependencies:
-      effect: 4.0.0-beta.64
-      xstate: 5.31.1
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3':
     optional: true

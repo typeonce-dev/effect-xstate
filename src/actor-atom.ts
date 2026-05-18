@@ -72,7 +72,7 @@ export const actorRefAtom = <TLogic extends AnyActorLogic>(
  * Reading the atom returns the current XState snapshot. Writing to the atom
  * sends an event to the actor. This makes the machine a first-class node in the
  * Atom graph while XState still owns states, transitions, children, invokes,
- * emitted events, and persistence.
+ * and emitted events.
  *
  * @since 0.1.0
  * @category constructors
@@ -180,10 +180,10 @@ export const emittedAtom = <
   });
 
 /**
- * Exposes an actor's persisted XState snapshot as an Atom.
+ * Exposes XState's persisted snapshot for an actor as an Atom.
  *
- * Use this when persistence, debugging, or hydration code should observe the
- * same lazy actor lifecycle as the rest of the Atom graph.
+ * This delegates directly to `actor.getPersistedSnapshot()` and does not add
+ * Effect-specific encoding, decoding, or restoration semantics.
  *
  * @since 0.1.0
  * @category combinators

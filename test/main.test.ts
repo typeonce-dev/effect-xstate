@@ -72,6 +72,25 @@ describe("fromEffect", () => {
     actor.stop();
   });
 
+  it("captures synchronous defects thrown while constructing an Effect", async () => {
+    const defect = new Error("boom");
+    const logic = fromEffect({
+      effect: () => {
+        throw defect;
+      },
+    });
+    const actor = createActor(logic);
+
+    actor.subscribe({ error: () => {} });
+    actor.start();
+
+    const snapshot = await waitForStatus(actor, "error");
+    if (snapshot.error === undefined) {
+      throw new Error("Expected Effect defect cause");
+    }
+    expect(Cause.hasDies(snapshot.error)).toBe(true);
+  });
+
   it("keeps a stopped actor stopped when interruption reports later", async () => {
     let interrupted = false;
     const logic = fromEffect({
@@ -93,6 +112,7 @@ describe("fromEffect", () => {
       expect(interrupted).toBe(true);
     });
     expect(actor.getSnapshot().status).toBe("stopped");
+    expect(actor.getSnapshot().result.waiting).toBe(false);
 
     await Effect.runPromise(Effect.yieldNow);
     expect(actor.getSnapshot().status).toBe("stopped");
@@ -172,10 +192,29 @@ describe("fromStream", () => {
     const snapshot = await waitForStatus(actor, "done");
     expect(snapshot.items).toEqual([1, 2, 3]);
     expect(snapshot.output).toEqual([1, 2, 3]);
+    expect(snapshot.result.waiting).toBe(false);
     expect(emitted).toHaveBeenCalledTimes(3);
     expect(emitted).toHaveBeenLastCalledWith({ type: "stream.item", value: 3 });
 
     actor.stop();
+  });
+
+  it("captures synchronous defects thrown while constructing a Stream", async () => {
+    const logic = fromStream({
+      stream: () => {
+        throw new Error("stream boom");
+      },
+    });
+    const actor = createActor(logic);
+
+    actor.subscribe({ error: () => {} });
+    actor.start();
+
+    const snapshot = await waitForStatus(actor, "error");
+    if (snapshot.error === undefined) {
+      throw new Error("Expected Stream defect cause");
+    }
+    expect(Cause.hasDies(snapshot.error)).toBe(true);
   });
 
   it("preserves collected items when a stream fails", async () => {
@@ -224,6 +263,7 @@ describe("fromStream", () => {
       output: undefined,
       error: undefined,
     });
+    expect(actor.getSnapshot().result.waiting).toBe(false);
   });
 });
 
@@ -248,6 +288,22 @@ describe("fromAtom", () => {
     actor.send({ type: "atom.set", value: 5 });
     expect(registry.get(count)).toBe(5);
     expect(actor.getSnapshot().context).toBe(5);
+
+    actor.stop();
+  });
+
+  it("re-reads the Atom value when the actor starts", () => {
+    const registry = AtomRegistry.make();
+    const count = Atom.make(0);
+    const actor = createActor(fromAtom({ atom: count, registry }));
+
+    registry.set(count, 5);
+    actor.start();
+
+    expect(actor.getSnapshot()).toMatchObject({
+      status: "active",
+      context: 5,
+    });
 
     actor.stop();
   });
@@ -296,8 +352,8 @@ describe("fromAtom", () => {
     const actor = createActor(fromAtom({ atom: count, registry })).start();
 
     actor.send({ type: "xstate.stop" });
-    actor.send({ type: "atom.changed", value: 10 });
     actor.send({ type: "atom.set", value: 20 });
+    actor.send({ type: "atom.refresh" });
 
     expect(actor.getSnapshot()).toMatchObject({
       status: "stopped",
@@ -348,7 +404,7 @@ describe("actorAtom", () => {
     unmount();
   });
 
-  it("selects snapshots, emitted events, and persisted snapshots", () => {
+  it("selects snapshots, emitted events, and XState persisted snapshots", () => {
     const registry = AtomRegistry.make();
     const counter = actorAtom({ logic: counterMachine });
     const selected = selectAtom({

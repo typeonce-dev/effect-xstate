@@ -45,4 +45,4 @@ pnpm install
 pnpm dev
 ```
 
-It is a standalone Vite app that imports `@effect/xstate` through a local `file:` dependency, uses `@effect/atom-react` for React hooks, and demonstrates `actorAtom`, `selectAtom`, `emittedAtom`, `persistedAtom`, `fromAtom`, and `fromEffect`.
+It is a standalone Vite app that imports the bridge through local source paths, uses `@effect/atom-react` for React hooks, and demonstrates `actorAtom`, `selectAtom`, `emittedAtom`, `persistedAtom`, `fromAtom`, and `fromEffect`.

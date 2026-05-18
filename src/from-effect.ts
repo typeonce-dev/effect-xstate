@@ -2,9 +2,12 @@ import { Cause, Effect, Exit, Fiber, Stream } from "effect";
 import { AsyncResult } from "effect/unstable/reactivity";
 import type {
   ActorLogic,
+  ActorScope,
   ActorSystem,
   ActorSystemInfo,
+  AnyEventObject,
   EventObject,
+  Snapshot,
 } from "xstate";
 
 export type EffectSuccessEvent<A> = {
@@ -21,7 +24,9 @@ export type EffectStopEvent = {
   readonly type: "xstate.stop";
 };
 
-export type EffectActorEvent<A, E> =
+export type EffectActorEvent<A, E> = EffectStopEvent;
+
+type EffectInternalEvent<A, E> =
   | EffectSuccessEvent<A>
   | EffectFailureEvent<E>
   | EffectStopEvent;
@@ -101,6 +106,44 @@ const stopped = <A, E, TInput>(
   result,
 });
 
+const settleResult = <A, E>(
+  result: AsyncResult.AsyncResult<A, E>
+): AsyncResult.AsyncResult<A, E> => {
+  switch (result._tag) {
+    case "Initial":
+      return AsyncResult.initial(false);
+    case "Success":
+      return AsyncResult.success(result.value, {
+        timestamp: result.timestamp,
+      });
+    case "Failure":
+      return AsyncResult.failure(result.cause, {
+        previousSuccess: result.previousSuccess,
+      });
+  }
+};
+
+const relayIfActive = <
+  TSnapshot extends Snapshot<unknown>,
+  TEvent extends EventObject,
+  TEmitted extends EventObject,
+>(
+  actorScope: ActorScope<
+    TSnapshot,
+    TEvent,
+    ActorSystem<ActorSystemInfo>,
+    TEmitted
+  >,
+  event: AnyEventObject
+): void => {
+  if (actorScope.self.getSnapshot().status !== "active") {
+    return;
+  }
+  (actorScope.self as unknown as { send: (event: AnyEventObject) => void }).send(
+    event
+  );
+};
+
 /**
  * Converts an Effect workflow into XState actor logic.
  *
@@ -131,7 +174,11 @@ export const fromEffect = <
 > => {
   const fibers = new WeakMap<object, Fiber.Fiber<unknown, unknown>>();
   return {
-    transition: (snapshot, event, actorScope) => {
+    transition: (
+      snapshot,
+      event: EffectInternalEvent<A, E>,
+      actorScope
+    ) => {
       if (event.type === "effect.success") {
         if (snapshot.status !== "active") {
           return snapshot;
@@ -147,7 +194,7 @@ export const fromEffect = <
       if (event.type === "xstate.stop") {
         fibers.get(actorScope.self)?.interruptUnsafe();
         fibers.delete(actorScope.self);
-        return stopped(snapshot.result);
+        return stopped(settleResult(snapshot.result));
       }
       return snapshot;
     },
@@ -157,21 +204,23 @@ export const fromEffect = <
         return;
       }
       const fiber = Effect.runFork(
-        config.effect({
-          input: snapshot.input,
-          emit: actorScope.emit,
-        })
+        Effect.suspend(() =>
+          config.effect({
+            input: snapshot.input,
+            emit: actorScope.emit,
+          })
+        )
       );
       fibers.set(actorScope.self, fiber);
       fiber.addObserver((exit) => {
         fibers.delete(actorScope.self);
         if (Exit.isSuccess(exit)) {
-          actorScope.self.send({
+          relayIfActive(actorScope, {
             type: "effect.success",
             value: exit.value,
           });
         } else {
-          actorScope.self.send({
+          relayIfActive(actorScope, {
             type: "effect.failure",
             cause: exit.cause,
           });
@@ -196,7 +245,9 @@ export type StreamFailureEvent<E> = {
   readonly cause: Cause.Cause<E>;
 };
 
-export type StreamActorEvent<A, E> =
+export type StreamActorEvent<A, E> = EffectStopEvent;
+
+type StreamInternalEvent<A, E> =
   | StreamNextEvent<A>
   | StreamDoneEvent
   | StreamFailureEvent<E>
@@ -284,7 +335,11 @@ export const fromStream = <
 > => {
   const fibers = new WeakMap<object, Fiber.Fiber<unknown, unknown>>();
   return {
-    transition: (snapshot, event, actorScope) => {
+    transition: (
+      snapshot,
+      event: StreamInternalEvent<A, E>,
+      actorScope
+    ) => {
       if (event.type === "stream.next") {
         if (snapshot.status !== "active") {
           return snapshot;
@@ -309,7 +364,7 @@ export const fromStream = <
           error: undefined,
           input: undefined,
           items: snapshot.items,
-          result: snapshot.result,
+          result: settleResult(snapshot.result),
         };
       }
       if (event.type === "stream.failure") {
@@ -334,7 +389,7 @@ export const fromStream = <
           error: undefined,
           input: undefined,
           items: snapshot.items,
-          result: snapshot.result,
+          result: settleResult(snapshot.result),
         };
       }
       return snapshot;
@@ -345,15 +400,16 @@ export const fromStream = <
         return;
       }
       const fiber = Effect.runFork(
-        config
-          .stream({
+        Stream.suspend(() =>
+          config.stream({
             input: snapshot.input,
             emit: actorScope.emit,
           })
+        )
           .pipe(
             Stream.runForEach((value) =>
               Effect.sync(() => {
-                actorScope.self.send({
+                relayIfActive(actorScope, {
                   type: "stream.next",
                   value,
                 });
@@ -365,11 +421,11 @@ export const fromStream = <
       fiber.addObserver((exit) => {
         fibers.delete(actorScope.self);
         if (Exit.isSuccess(exit)) {
-          actorScope.self.send({
+          relayIfActive(actorScope, {
             type: "stream.done",
           });
         } else {
-          actorScope.self.send({
+          relayIfActive(actorScope, {
             type: "stream.failure",
             cause: exit.cause,
           });
