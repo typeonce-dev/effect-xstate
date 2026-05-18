@@ -1,0 +1,32 @@
+{
+  "name": "@effect/xstate",
+  "author": "Sandro Maglione",
+  "type": "module",
+  "types": "./src/main.ts",
+  "exports": {
+    ".": {
+      "types": "./src/main.ts",
+      "default": "./src/main.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test-types": "tstyche",
+    "test": "vitest",
+    "coverage": "vitest --coverage",
+    "lint:all": "NODE_OPTIONS='--experimental-strip-types' oxlint --deny-warnings",
+    "lint:fix": "NODE_OPTIONS='--experimental-strip-types' oxlint --fix",
+    "lint": "NODE_OPTIONS='--experimental-strip-types' oxlint --quiet"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-beta.64",
+    "@types/node": "^25.7.0",
+    "tstyche": "^7.1.0",
+    "typescript": "^6.0.2",
+    "vitest": "4.1.4"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.64",
+    "xstate": "^5.19.2"
+  }
+}
