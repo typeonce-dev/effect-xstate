@@ -21,7 +21,14 @@ export type {
   AtomStopEvent,
   FromAtomConfig,
 } from "./from-atom";
-export { fromEffect, fromStream } from "./from-effect";
+export {
+  failureCause,
+  failureValue,
+  fromEffect,
+  fromStream,
+  isFailureSnapshot,
+  prettyCause,
+} from "./from-effect";
 export { runtime } from "./xstate-runtime";
 export type {
   EffectActorEvent,
@@ -31,5 +38,6 @@ export type {
   FromStreamConfig,
   StreamActorEvent,
   StreamActorSnapshot,
+  StreamAccumulationPolicy,
 } from "./from-effect";
 export type { RuntimeActorAtomConfig, XStateRuntime } from "./xstate-runtime";

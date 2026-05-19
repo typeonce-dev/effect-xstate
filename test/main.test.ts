@@ -1,5 +1,5 @@
 import { Cause, Context, Effect, Layer, Option, Stream } from "effect";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { createActor, assign, emit, sendTo, setup } from "xstate";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -211,6 +211,92 @@ describe("fromEffect", () => {
 
     unmount();
   });
+
+  it("waits for an Atom runtime to become available before starting", async () => {
+    const registry = AtomRegistry.make();
+    const runtimeAtom = Atom.make<
+      AsyncResult.AsyncResult<Context.Context<PricingService>, never>
+    >(AsyncResult.initial(true));
+    const logic = fromEffect({
+      effect: () =>
+        Effect.gen(function* () {
+          const service = yield* PricingService;
+          return service.unitPrice;
+        }),
+    });
+    const actor = actorAtom({ logic, runtime: runtimeAtom });
+    const unmount = registry.mount(actor);
+
+    expect(registry.get(actor).status).toBe("active");
+
+    registry.set(
+      runtimeAtom,
+      AsyncResult.success(
+        Context.make(PricingService, PricingService.of({ unitPrice: 22 }))
+      )
+    );
+
+    await vi.waitFor(() => {
+      expect(registry.get(actor).status).toBe("done");
+    });
+    expect(registry.get(actor).output).toBe(22);
+
+    unmount();
+  });
+
+  it("turns Atom runtime failures into Effect actor error snapshots", async () => {
+    const registry = AtomRegistry.make();
+    const runtimeAtom = Atom.make<
+      AsyncResult.AsyncResult<Context.Context<PricingService>, "runtime failed">
+    >(
+      AsyncResult.failure<Context.Context<PricingService>, "runtime failed">(
+        Cause.fail("runtime failed" as const)
+      )
+    );
+    const logic = fromEffect({
+      effect: () =>
+        Effect.gen(function* () {
+          const service = yield* PricingService;
+          return service.unitPrice;
+        }),
+    });
+    const actor = actorAtom({ logic, runtime: runtimeAtom });
+    const unmount = registry.mount(actor);
+
+    await vi.waitFor(() => {
+      expect(registry.get(actor).status).toBe("error");
+    });
+    const snapshot = registry.get(actor);
+    if (snapshot.status !== "error") {
+      throw new Error("Expected error snapshot");
+    }
+    expect(snapshot.cause).toEqual(Cause.fail("runtime failed"));
+
+    unmount();
+  });
+
+  it("creates standalone service-backed actors from an XState runtime", async () => {
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.succeed(PricingService, PricingService.of({ unitPrice: 31 }))
+      )
+    );
+    const logic = fromEffect({
+      effect: () =>
+        Effect.gen(function* () {
+          const service = yield* PricingService;
+          return service.unitPrice;
+        }),
+    });
+    const actor = runtime.createActor({ logic });
+
+    actor.start();
+
+    const snapshot = await waitForStatus(actor, "done");
+    expect(snapshot.output).toBe(31);
+
+    actor.stop();
+  });
 });
 
 describe("fromStream", () => {
@@ -284,6 +370,86 @@ describe("fromStream", () => {
     expect(snapshot.items).toEqual([1, 2]);
     expect(snapshot.output).toBeUndefined();
     expect(snapshot.error).toEqual(Cause.fail("boom"));
+
+    actor.stop();
+  });
+
+  it("supports bounded stream collection", async () => {
+    const logic = fromStream({
+      stream: () => Stream.fromIterable([1, 2, 3]),
+      accumulation: { mode: "collect", maxItems: 2 },
+    });
+    const actor = createActor(logic);
+
+    actor.start();
+
+    const snapshot = await waitForStatus(actor, "done");
+    expect(snapshot.items).toEqual([2, 3]);
+    expect(snapshot.value).toEqual([2, 3]);
+    expect(snapshot.output).toEqual([2, 3]);
+    expect(snapshot.latest).toBe(3);
+    expect(snapshot.count).toBe(3);
+
+    actor.stop();
+  });
+
+  it("supports latest-only stream snapshots", async () => {
+    const logic = fromStream({
+      stream: () => Stream.fromIterable([1, 2, 3]),
+      accumulation: { mode: "latest" },
+    });
+    const actor = createActor(logic);
+
+    actor.start();
+
+    const snapshot = await waitForStatus(actor, "done");
+    expect(snapshot.items).toEqual([3]);
+    expect(snapshot.value).toEqual([3]);
+    expect(snapshot.output).toEqual([3]);
+    expect(snapshot.latest).toBe(3);
+    expect(snapshot.count).toBe(3);
+
+    actor.stop();
+  });
+
+  it("supports emit-only stream snapshots", async () => {
+    const logic = fromStream({
+      stream: () => Stream.fromIterable([1, 2, 3]),
+      accumulation: { mode: "none" },
+    });
+    const actor = createActor(logic);
+
+    actor.start();
+
+    const snapshot = await waitForStatus(actor, "done");
+    expect(snapshot.items).toEqual([]);
+    expect(snapshot.value).toEqual([]);
+    expect(snapshot.output).toEqual([]);
+    expect(snapshot.latest).toBe(3);
+    expect(snapshot.count).toBe(3);
+
+    actor.stop();
+  });
+
+  it("supports reduced stream snapshots", async () => {
+    const logic = fromStream({
+      stream: () => Stream.fromIterable([1, 2, 3]),
+      accumulation: {
+        mode: "reduce",
+        seed: 0,
+        reducer: (sum, value) => sum + value,
+      },
+    });
+    const actor = createActor(logic);
+
+    actor.start();
+
+    const snapshot = await waitForStatus(actor, "done");
+    expect(snapshot.items).toEqual([]);
+    expect(snapshot.value).toBe(6);
+    expect(snapshot.output).toBe(6);
+    expect(snapshot.latest).toBe(3);
+    expect(snapshot.count).toBe(3);
 
     actor.stop();
   });

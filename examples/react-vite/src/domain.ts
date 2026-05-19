@@ -160,6 +160,7 @@ export const quoteAtom = selectAtom({
 
 export const tickerActor = runtime.actorAtom({
   logic: fromStream({
+    accumulation: { mode: "collect", maxItems: 5 },
     stream: () => {
       let count = 0;
       return Stream.fromEffectSchedule(
@@ -176,9 +177,9 @@ export const tickerActor = runtime.actorAtom({
 export const tickerAtom = selectAtom({
   actor: tickerActor,
   selector: (snapshot) => ({
-    count: snapshot.items.length,
-    latest: snapshot.items.at(-1) ?? "Waiting for first tick",
-    recent: snapshot.items.slice(-5),
+    count: snapshot.count,
+    latest: snapshot.latest ?? "Waiting for first tick",
+    recent: snapshot.items,
   }),
 });
 

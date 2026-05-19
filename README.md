@@ -38,6 +38,39 @@ const checkoutActor = runtime.actorAtom({
 });
 ```
 
+Service requirements are type-checked at the actor boundary. A machine that
+invokes service-backed `fromEffect` or `fromStream` logic must be created from a
+compatible `runtime.actorAtom(...)`, or from `runtime.createActor(...)` for
+standalone XState usage.
+
+Effect failures are exposed as typed `Cause` values:
+
+```ts
+const snapshot = actor.getSnapshot();
+
+if (isFailureSnapshot(snapshot)) {
+  console.log(prettyCause(failureCause(snapshot)));
+}
+```
+
+Streams support explicit accumulation policies for long-running actors:
+
+```ts
+const ticker = fromStream({
+  stream: () => Stream.fromIterable([1, 2, 3]),
+  accumulation: { mode: "collect", maxItems: 100 },
+});
+
+const total = fromStream({
+  stream: () => Stream.fromIterable([1, 2, 3]),
+  accumulation: {
+    mode: "reduce",
+    seed: 0,
+    reducer: (sum, value) => sum + value,
+  },
+});
+```
+
 Atoms can be invoked as actors too:
 
 ```ts

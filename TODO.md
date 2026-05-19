@@ -1,38 +1,12 @@
 # TODO
 
-## Runtime Typing
-
-- Connect service requirements from `fromEffect` and `fromStream` to `actorAtom`.
-- Ideally, a machine that invokes service-requiring actors should require `runtime(Atom.runtime(layer)).actorAtom(...)` or an equivalent runtime-bearing constructor.
-- Plain `actorAtom({ logic })` currently typechecks even when invoked Effect actors need services, so missing runtime support is only caught at runtime.
-
-## Runtime Bridge Lifecycle
-
-- Add explicit cleanup for actor-system runtime bridge entries when the root Atom-owned actor is finalized.
-- The current bridge uses a `WeakMap`, so it should not prevent garbage collection, but an explicit unregister would make lifecycle ownership clearer.
-- Keep the bridge internal and scoped. Do not use global prototype mutation or patch Effect/XState objects.
-
 ## Runtime Availability Semantics
 
-- Revisit what happens when an Atom runtime is still `Initial` while `fromEffect` or `fromStream` starts.
-- Current behavior turns unavailable runtime context into an error cause.
-- Consider waiting for runtime readiness instead, especially for async layer construction.
-
-## Stream Snapshot Policy
-
-- `fromStream` currently accumulates every emitted item in `snapshot.items`.
-- Add policy options for long-running streams:
-  - max item buffer
-  - latest-only snapshots
-  - custom reducer/accumulator
-  - emit-only mode with no item accumulation
-- This matters for infinite streams and UI subscriptions that should not grow memory forever.
+- Add more stress tests for actor stop/disposal while an Atom runtime is still `Initial`.
 
 ## Standalone XState Actors
 
-- Runtime services only flow automatically through Atom-owned actors.
-- Direct `createActor(fromEffect(...))` and `createActor(fromStream(...))` do not have a runtime context unless the effect has no service requirements.
-- Consider an explicit runtime option or helper for standalone XState usage.
+- Expand tests around `runtime.createActor(...)` for streams and machine invokes.
 
 ## Atom Registry Coverage
 

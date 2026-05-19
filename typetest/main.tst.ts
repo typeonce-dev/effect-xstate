@@ -112,6 +112,36 @@ describe("fromEffect", () => {
       options: { input: { quantity: 1 } },
     });
     expect(runtime.atom).type.toBeCallableWith(Effect.succeed(1));
+    expect(actorAtom).type.not.toBeCallableWith({
+      logic,
+      options: { input: { quantity: 1 } },
+    });
+  });
+
+  it("propagates invoked Effect service requirements through machines", () => {
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.succeed(PricingService, PricingService.of({ unitPrice: 12 }))
+      )
+    );
+    const machine = setup({
+      actors: {
+        pricing: fromEffect({
+          effect: () =>
+            Effect.gen(function* () {
+              const service = yield* PricingService;
+              return service.unitPrice;
+            }),
+        }),
+      },
+    }).createMachine({
+      invoke: {
+        src: "pricing",
+      },
+    });
+
+    expect(actorAtom).type.not.toBeCallableWith({ logic: machine });
+    expect(runtime.actorAtom).type.toBeCallableWith({ logic: machine });
   });
 });
 
@@ -177,6 +207,25 @@ describe("fromStream", () => {
     >();
   });
 
+  it("infers reduced stream accumulator values", () => {
+    const logic = fromStream({
+      stream: () => Stream.fromIterable([1, 2, 3]),
+      accumulation: {
+        mode: "reduce",
+        seed: 0,
+        reducer: (sum, value) => {
+          expect(sum).type.toBe<number>();
+          expect(value).type.toBe<number>();
+          return sum + value;
+        },
+      },
+    });
+
+    expect<SnapshotFrom<typeof logic>>().type.toBe<
+      StreamActorSnapshot<number, never, void, number>
+    >();
+  });
+
   it("accepts Stream services through an actorAtom runtime", () => {
     const runtime = xstateRuntime(
       Atom.runtime(
@@ -197,6 +246,7 @@ describe("fromStream", () => {
       StreamActorSnapshot<number, never, void>
     >();
     expect(runtime.actorAtom).type.toBeCallableWith({ logic });
+    expect(actorAtom).type.not.toBeCallableWith({ logic });
   });
 });
 

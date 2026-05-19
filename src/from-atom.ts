@@ -1,3 +1,4 @@
+import { Cause } from "effect";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 import type { ActorLogic, AnyActorRef, AnyActorScope } from "xstate";
 
@@ -42,7 +43,8 @@ export type AtomActorSnapshot<A> =
   | {
       readonly status: "error";
       readonly output: undefined;
-      readonly error: unknown;
+      readonly error: Cause.Cause<unknown>;
+      readonly cause: Cause.Cause<unknown>;
       readonly context: A;
     };
 
@@ -63,8 +65,11 @@ let currentRegistry: AtomRegistry.AtomRegistry | undefined;
 export const registerActorSystemRegistry = (
   system: AnyActorScope["system"],
   registry: AtomRegistry.AtomRegistry
-): void => {
+): (() => void) => {
   registryBySystem.set(system, registry);
+  return () => {
+    registryBySystem.delete(system);
+  };
 };
 
 export const withActorSystemRegistry = <A>(
@@ -93,6 +98,25 @@ const stopped = <A>(context: A): AtomActorSnapshot<A> => ({
   error: undefined,
   context,
 });
+
+const failed = <A>(
+  context: A,
+  cause: Cause.Cause<unknown>
+): AtomActorSnapshot<A> => ({
+  status: "error",
+  output: undefined,
+  error: cause,
+  cause,
+  context,
+});
+
+const tryCause = <A>(evaluate: () => A): A | Cause.Cause<unknown> => {
+  try {
+    return evaluate();
+  } catch (error) {
+    return Cause.die(error);
+  }
+};
 
 /**
  * Converts an Effect Atom into XState actor logic.
@@ -139,16 +163,23 @@ export function fromAtom<A, W = never>(
           return snapshot;
         }
         const registry = getRegistry(actorScope);
-        registry.refresh(config.atom);
-        return active(registry.get(config.atom));
+        const next = tryCause(() => {
+          registry.refresh(config.atom);
+          return registry.get(config.atom);
+        });
+        return Cause.isCause(next) ? failed(snapshot.context, next) : active(next);
       }
       if (event.type === "atom.set" && Atom.isWritable(config.atom)) {
         if (snapshot.status !== "active") {
           return snapshot;
         }
         const registry = getRegistry(actorScope);
-        registry.set(config.atom, event.value);
-        return active(registry.get(config.atom));
+        const atom = config.atom;
+        const next = tryCause(() => {
+          registry.set(atom, event.value);
+          return registry.get(atom);
+        });
+        return Cause.isCause(next) ? failed(snapshot.context, next) : active(next);
       }
       if (event.type === "xstate.stop") {
         subscriptions.get(actorScope.self)?.();
@@ -157,25 +188,33 @@ export function fromAtom<A, W = never>(
       }
       return snapshot;
     },
-    getInitialSnapshot: (actorScope) =>
-      active(getRegistry(actorScope).get(config.atom)),
+    getInitialSnapshot: (actorScope) => {
+      const initial = tryCause(() => getRegistry(actorScope).get(config.atom));
+      return Cause.isCause(initial)
+        ? failed(undefined as A, initial)
+        : active(initial);
+    },
     start: (_snapshot, actorScope) => {
       const registry = getRegistry(actorScope);
-      const unsubscribe = registry.subscribe(
-        config.atom,
-        (value) => {
-          (
-            actorScope.self as unknown as {
-              send: (event: AtomChangedEvent<A>) => void;
-            }
-          ).send({
-            type: "atom.changed",
-            value,
-          });
-        },
-        { immediate: true }
+      const unsubscribe = tryCause(() =>
+        registry.subscribe(
+          config.atom,
+          (value) => {
+            (
+              actorScope.self as unknown as {
+                send: (event: AtomChangedEvent<A>) => void;
+              }
+            ).send({
+              type: "atom.changed",
+              value,
+            });
+          },
+          { immediate: true }
+        )
       );
-      subscriptions.set(actorScope.self, unsubscribe);
+      if (!Cause.isCause(unsubscribe)) {
+        subscriptions.set(actorScope.self, unsubscribe);
+      }
     },
     getPersistedSnapshot: (snapshot) => snapshot,
   };
