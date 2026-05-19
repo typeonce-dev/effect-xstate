@@ -82,7 +82,7 @@ button:disabled {
   box-shadow: 0 18px 60px rgba(40, 32, 18, 0.08);
 }
 
-.panel:last-child {
+.panel:nth-last-child(-n + 2) {
   grid-column: 1 / -1;
 }
 
@@ -169,6 +169,10 @@ button:disabled {
   margin-bottom: 18px;
 }
 
+.metric-row.compact {
+  margin-bottom: 12px;
+}
+
 .metric {
   min-width: 0;
   padding: 14px;
@@ -223,6 +227,22 @@ button:disabled {
   padding: 14px;
   border: 1px solid #d8d0c1;
   border-radius: 8px;
+  background: #fffdf8;
+}
+
+.activity-list {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-list li {
+  padding: 10px 12px;
+  border: 1px solid #d8d0c1;
+  border-radius: 8px;
+  color: #445044;
   background: #fffdf8;
 }
 

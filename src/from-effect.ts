@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, Fiber, Stream } from "effect";
+import { Cause, Context, Effect, Exit, Fiber, Stream } from "effect";
 import { AsyncResult } from "effect/unstable/reactivity";
 import type {
   ActorLogic,
@@ -9,6 +9,7 @@ import type {
   EventObject,
   Snapshot,
 } from "xstate";
+import { getActorSystemRuntimeContext } from "./actor-system-runtime";
 
 export type EffectSuccessEvent<A> = {
   readonly type: "effect.success";
@@ -61,11 +62,17 @@ export type EffectActorSnapshot<A, E, TInput> =
       readonly result: AsyncResult.AsyncResult<A, E>;
     };
 
-export type FromEffectConfig<A, E, TInput, TEmitted extends EventObject> = {
+export type FromEffectConfig<
+  A,
+  E,
+  TInput,
+  TEmitted extends EventObject,
+  R,
+> = {
   readonly effect: (scope: {
     readonly input: TInput;
     readonly emit: (event: TEmitted) => void;
-  }) => Effect.Effect<A, E>;
+  }) => Effect.Effect<A, E, R>;
 };
 
 const active = <A, E, TInput>(
@@ -163,8 +170,9 @@ export const fromEffect = <
   E = never,
   TInput = void,
   TEmitted extends EventObject = EventObject,
+  R = never,
 >(
-  config: FromEffectConfig<A, E, TInput, TEmitted>
+  config: FromEffectConfig<A, E, TInput, TEmitted, R>
 ): ActorLogic<
   EffectActorSnapshot<A, E, TInput>,
   EffectActorEvent<A, E>,
@@ -173,9 +181,21 @@ export const fromEffect = <
   TEmitted
 > => {
   const fibers = new WeakMap<object, Fiber.Fiber<unknown, unknown>>();
+  const getRuntimeContext = (
+    actorScope: ActorScope<
+      EffectActorSnapshot<A, E, TInput>,
+      EffectActorEvent<A, E>,
+      ActorSystem<ActorSystemInfo>,
+      TEmitted
+    >
+  ): Exit.Exit<Context.Context<R>, E> =>
+    getActorSystemRuntimeContext(actorScope.system) as Exit.Exit<
+      Context.Context<R>,
+      E
+    >;
   return {
     transition: (
-      snapshot,
+      snapshot: EffectActorSnapshot<A, E, TInput>,
       event: EffectInternalEvent<A, E>,
       actorScope
     ) => {
@@ -203,7 +223,15 @@ export const fromEffect = <
       if (snapshot.status !== "active") {
         return;
       }
-      const fiber = Effect.runFork(
+      const services = getRuntimeContext(actorScope);
+      if (Exit.isFailure(services)) {
+        relayIfActive(actorScope, {
+          type: "effect.failure",
+          cause: services.cause,
+        });
+        return;
+      }
+      const fiber = Effect.runForkWith(services.value)(
         Effect.suspend(() =>
           config.effect({
             input: snapshot.input,
@@ -287,11 +315,17 @@ export type StreamActorSnapshot<A, E, TInput> =
       readonly result: AsyncResult.AsyncResult<A, E>;
     };
 
-export type FromStreamConfig<A, E, TInput, TEmitted extends EventObject> = {
+export type FromStreamConfig<
+  A,
+  E,
+  TInput,
+  TEmitted extends EventObject,
+  R,
+> = {
   readonly stream: (scope: {
     readonly input: TInput;
     readonly emit: (event: TEmitted) => void;
-  }) => Stream.Stream<A, E>;
+  }) => Stream.Stream<A, E, R>;
 };
 
 const streamActive = <A, E, TInput>(
@@ -324,8 +358,9 @@ export const fromStream = <
   E = never,
   TInput = void,
   TEmitted extends EventObject = EventObject,
+  R = never,
 >(
-  config: FromStreamConfig<A, E, TInput, TEmitted>
+  config: FromStreamConfig<A, E, TInput, TEmitted, R>
 ): ActorLogic<
   StreamActorSnapshot<A, E, TInput>,
   StreamActorEvent<A, E>,
@@ -334,9 +369,21 @@ export const fromStream = <
   TEmitted
 > => {
   const fibers = new WeakMap<object, Fiber.Fiber<unknown, unknown>>();
+  const getRuntimeContext = (
+    actorScope: ActorScope<
+      StreamActorSnapshot<A, E, TInput>,
+      StreamActorEvent<A, E>,
+      ActorSystem<ActorSystemInfo>,
+      TEmitted
+    >
+  ): Exit.Exit<Context.Context<R>, E> =>
+    getActorSystemRuntimeContext(actorScope.system) as Exit.Exit<
+      Context.Context<R>,
+      E
+    >;
   return {
     transition: (
-      snapshot,
+      snapshot: StreamActorSnapshot<A, E, TInput>,
       event: StreamInternalEvent<A, E>,
       actorScope
     ) => {
@@ -399,7 +446,15 @@ export const fromStream = <
       if (snapshot.status !== "active") {
         return;
       }
-      const fiber = Effect.runFork(
+      const services = getRuntimeContext(actorScope);
+      if (Exit.isFailure(services)) {
+        relayIfActive(actorScope, {
+          type: "stream.failure",
+          cause: services.cause,
+        });
+        return;
+      }
+      const fiber = Effect.runForkWith(services.value)(
         Stream.suspend(() =>
           config.stream({
             input: snapshot.input,

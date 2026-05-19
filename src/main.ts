@@ -10,6 +10,7 @@ export type {
   ActorAtomConfig,
   ActorAtomOptions,
   EmittedSelection,
+  RuntimeAtom,
 } from "./actor-atom";
 export { fromAtom } from "./from-atom";
 export type {
@@ -21,6 +22,7 @@ export type {
   FromAtomConfig,
 } from "./from-atom";
 export { fromEffect, fromStream } from "./from-effect";
+export { runtime } from "./xstate-runtime";
 export type {
   EffectActorEvent,
   EffectActorSnapshot,
@@ -30,3 +32,4 @@ export type {
   StreamActorEvent,
   StreamActorSnapshot,
 } from "./from-effect";
+export type { RuntimeActorAtomConfig, XStateRuntime } from "./xstate-runtime";

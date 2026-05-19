@@ -25,6 +25,19 @@ const quoteActor = fromEffect({
 });
 ```
 
+When invoked actors need Effect services, wrap an `Atom.runtime` once and create
+the actor atom from that runtime:
+
+```ts
+import { runtime as xstateRuntime } from "@effect/xstate";
+
+const runtime = xstateRuntime(Atom.runtime(PricingLive));
+
+const checkoutActor = runtime.actorAtom({
+  logic: checkoutMachine,
+});
+```
+
 Atoms can be invoked as actors too:
 
 ```ts

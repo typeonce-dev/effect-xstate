@@ -1,12 +1,13 @@
 import {
-  actorAtom,
   emittedAtom,
   fromAtom,
   fromEffect,
+  fromStream,
   persistedAtom,
+  runtime as xstateRuntime,
   selectAtom,
 } from "../../../src/main";
-import { Effect } from "effect";
+import { Context, Effect, Layer, Schedule, Stream } from "effect";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { assign, emit, setup } from "xstate";
 
@@ -31,7 +32,29 @@ type CheckoutEvent =
   | { readonly type: "payment.confirmed" }
   | { readonly type: "checkout.reset" };
 
+interface PricingService {
+  readonly quote: (quantity: number) => Effect.Effect<Quote>;
+}
+
+const PricingService = Context.Service<PricingService>("PricingService");
+
 export const registry = AtomRegistry.make();
+
+export const runtime = xstateRuntime(
+  Atom.runtime(
+    Layer.succeed(
+      PricingService,
+      PricingService.of({
+        quote: (quantity) =>
+          Effect.succeed({
+            quantity,
+            unitPrice: 12,
+            total: quantity * 12,
+          }).pipe(Effect.delay("350 millis")),
+      })
+    )
+  )
+);
 
 export const quantityAtom = Atom.make(1);
 
@@ -47,11 +70,10 @@ export const checkoutMachine = setup({
     }),
     pricing: fromEffect({
       effect: (scope: { readonly input: { readonly quantity: number } }) =>
-        Effect.succeed({
-          quantity: scope.input.quantity,
-          unitPrice: 12,
-          total: scope.input.quantity * 12,
-        }).pipe(Effect.delay("350 millis")),
+        Effect.gen(function* () {
+          const service = yield* PricingService;
+          return yield* service.quote(scope.input.quantity);
+        }),
     }),
   },
 }).createMachine({
@@ -113,13 +135,16 @@ export const checkoutMachine = setup({
       on: {
         "checkout.reset": {
           target: "editing",
+          actions: assign({
+            quote: null,
+          }),
         },
       },
     },
   },
 });
 
-export const checkoutActor = actorAtom({
+export const checkoutActor = runtime.actorAtom({
   logic: checkoutMachine,
 });
 
@@ -131,6 +156,30 @@ export const checkoutStatusAtom = selectAtom({
 export const quoteAtom = selectAtom({
   actor: checkoutActor,
   selector: (snapshot) => snapshot.context.quote,
+});
+
+export const tickerActor = runtime.actorAtom({
+  logic: fromStream({
+    stream: () => {
+      let count = 0;
+      return Stream.fromEffectSchedule(
+        Effect.sync(() => {
+          count += 1;
+          return `tick ${count} at ${new Date().toLocaleTimeString()}`;
+        }),
+        Schedule.spaced("1 second")
+      );
+    },
+  }),
+});
+
+export const tickerAtom = selectAtom({
+  actor: tickerActor,
+  selector: (snapshot) => ({
+    count: snapshot.items.length,
+    latest: snapshot.items.at(-1) ?? "Waiting for first tick",
+    recent: snapshot.items.slice(-5),
+  }),
 });
 
 export const canRequestQuoteAtom = selectAtom({

@@ -1,4 +1,4 @@
-import { Cause, Effect, Option, Stream } from "effect";
+import { Cause, Context, Effect, Layer, Option, Stream } from "effect";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { createActor, assign, emit, sendTo, setup } from "xstate";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import {
   fromEffect,
   fromStream,
   persistedAtom,
+  runtime as xstateRuntime,
   selectAtom,
 } from "../src/main";
 
@@ -23,6 +24,11 @@ const waitForStatus = async <S extends { readonly status: string }>(
 };
 
 describe("fromEffect", () => {
+  class PricingService extends Context.Service<
+    PricingService,
+    { readonly unitPrice: number }
+  >()("test/PricingService") {}
+
   it("runs an Effect actor with input, output, and emitted events", async () => {
     const logic = fromEffect({
       effect: (scope: {
@@ -163,9 +169,56 @@ describe("fromEffect", () => {
       expect(interrupted).toBe(true);
     });
   });
+
+  it("runs with a custom Atom runtime when used through actorAtom", async () => {
+    const registry = AtomRegistry.make();
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.succeed(PricingService, PricingService.of({ unitPrice: 17 }))
+      )
+    );
+    const machine = setup({
+      types: {
+        context: {} as { readonly total: number },
+      },
+      actors: {
+        pricing: fromEffect({
+          effect: (scope: { readonly input: { readonly quantity: number } }) =>
+            Effect.gen(function* () {
+              const service = yield* PricingService;
+              return scope.input.quantity * service.unitPrice;
+            }),
+        }),
+      },
+    }).createMachine({
+      context: { total: 0 },
+      invoke: {
+        src: "pricing",
+        input: { quantity: 3 },
+        onDone: {
+          actions: assign({
+            total: ({ event }) => event.output,
+          }),
+        },
+      },
+    });
+    const machineAtom = runtime.actorAtom({ logic: machine });
+    const unmount = registry.mount(machineAtom);
+
+    await vi.waitFor(() => {
+      expect(registry.get(machineAtom).context.total).toBe(51);
+    });
+
+    unmount();
+  });
 });
 
 describe("fromStream", () => {
+  class NumberSource extends Context.Service<
+    NumberSource,
+    { readonly values: ReadonlyArray<number> }
+  >()("test/NumberSource") {}
+
   it("collects stream items and emits side-channel events", async () => {
     const logic = fromStream({
       stream: (scope: {
@@ -264,6 +317,49 @@ describe("fromStream", () => {
       error: undefined,
     });
     expect(actor.getSnapshot().result.waiting).toBe(false);
+  });
+
+  it("runs with a custom Atom runtime when used through actorAtom", async () => {
+    const registry = AtomRegistry.make();
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.succeed(NumberSource, NumberSource.of({ values: [4, 5, 6] }))
+      )
+    );
+    const machine = setup({
+      types: {
+        context: {} as { readonly values: ReadonlyArray<number> },
+      },
+      actors: {
+        numbers: fromStream({
+          stream: () =>
+            Stream.unwrap(
+              Effect.gen(function* () {
+                const source = yield* NumberSource;
+                return Stream.fromIterable(source.values);
+              })
+            ),
+        }),
+      },
+    }).createMachine({
+      context: { values: [] },
+      invoke: {
+        src: "numbers",
+        onDone: {
+          actions: assign({
+            values: ({ event }) => event.output,
+          }),
+        },
+      },
+    });
+    const machineAtom = runtime.actorAtom({ logic: machine });
+    const unmount = registry.mount(machineAtom);
+
+    await vi.waitFor(() => {
+      expect(registry.get(machineAtom).context.values).toEqual([4, 5, 6]);
+    });
+
+    unmount();
   });
 });
 

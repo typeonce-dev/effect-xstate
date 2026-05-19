@@ -1,4 +1,4 @@
-import { Cause, Effect, Option, Stream } from "effect";
+import { Cause, Context, Effect, Layer, Option, Stream } from "effect";
 import { Atom } from "effect/unstable/reactivity";
 import { describe, expect, it } from "tstyche";
 import {
@@ -18,11 +18,17 @@ import {
   type AtomActorSnapshot,
   fromEffect,
   fromStream,
+  runtime as xstateRuntime,
   type StreamActorEvent,
   type StreamActorSnapshot,
 } from "@effect/xstate";
 
 describe("fromEffect", () => {
+  class PricingService extends Context.Service<
+    PricingService,
+    { readonly unitPrice: number }
+  >()("test/PricingService") {}
+
   it("infers input, output, failure, and emitted event types", () => {
     const logic = fromEffect({
       effect: (scope: {
@@ -80,9 +86,41 @@ describe("fromEffect", () => {
       EffectActorEvent<never, { _tag: "PricingError" }>
     >();
   });
+
+  it("accepts Effect services through an actorAtom runtime", () => {
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.succeed(PricingService, PricingService.of({ unitPrice: 12 }))
+      )
+    );
+    const logic = fromEffect({
+      effect: (scope: { readonly input: { readonly quantity: number } }) =>
+        Effect.gen(function* () {
+          const service = yield* PricingService;
+          return scope.input.quantity * service.unitPrice;
+        }),
+    });
+
+    expect<InputFrom<typeof logic>>().type.toBe<{
+      readonly quantity: number;
+    }>();
+    expect<SnapshotFrom<typeof logic>>().type.toBe<
+      EffectActorSnapshot<number, never, { readonly quantity: number }>
+    >();
+    expect(runtime.actorAtom).type.toBeCallableWith({
+      logic,
+      options: { input: { quantity: 1 } },
+    });
+    expect(runtime.atom).type.toBeCallableWith(Effect.succeed(1));
+  });
 });
 
 describe("fromStream", () => {
+  class NumberSource extends Context.Service<
+    NumberSource,
+    { readonly values: ReadonlyArray<number> }
+  >()("test/NumberSource") {}
+
   it("infers input, stream item, failure, and emitted event types", () => {
     const logic = fromStream({
       stream: (scope: {
@@ -137,6 +175,28 @@ describe("fromStream", () => {
     expect<EventFromLogic<typeof logic>>().type.toBe<
       StreamActorEvent<never, "stream failed">
     >();
+  });
+
+  it("accepts Stream services through an actorAtom runtime", () => {
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.succeed(NumberSource, NumberSource.of({ values: [1, 2] }))
+      )
+    );
+    const logic = fromStream({
+      stream: () =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const source = yield* NumberSource;
+            return Stream.fromIterable(source.values);
+          })
+        ),
+    });
+
+    expect<SnapshotFrom<typeof logic>>().type.toBe<
+      StreamActorSnapshot<number, never, void>
+    >();
+    expect(runtime.actorAtom).type.toBeCallableWith({ logic });
   });
 });
 

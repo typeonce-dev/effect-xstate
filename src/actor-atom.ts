@@ -1,5 +1,5 @@
-import { Option } from "effect";
-import { Atom } from "effect/unstable/reactivity";
+import { Cause, Context, Exit, Option } from "effect";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import {
   createActor,
   type Actor,
@@ -18,6 +18,11 @@ import {
   registerActorSystemRegistry,
   withActorSystemRegistry,
 } from "./from-atom";
+import { registerActorSystemRuntimeContext } from "./actor-system-runtime";
+
+export type RuntimeAtom<R, ER> = Atom.Atom<
+  AsyncResult.AsyncResult<Context.Context<R>, ER>
+>;
 
 export type ActorAtomOptions<TLogic extends AnyActorLogic> =
   ActorOptions<TLogic> & {
@@ -26,6 +31,7 @@ export type ActorAtomOptions<TLogic extends AnyActorLogic> =
 
 export type ActorAtomConfig<TLogic extends AnyActorLogic> = {
   readonly logic: TLogic;
+  readonly runtime?: RuntimeAtom<any, any> | undefined;
 } & ConditionalRequired<
   {
     readonly options?: ActorAtomOptions<TLogic>;
@@ -45,6 +51,21 @@ export type EmittedSelection<
   TType extends EmittedFrom<TLogic>["type"] | "*",
 > = EmittedFrom<TLogic> &
   (TType extends "*" ? object : { readonly type: TType });
+
+const runtimeContextExit = <R, ER>(
+  result: AsyncResult.AsyncResult<Context.Context<R>, ER>
+): Exit.Exit<Context.Context<R>, ER> => {
+  switch (result._tag) {
+    case "Success":
+      return Exit.succeed(result.value);
+    case "Failure":
+      return Exit.failCause(result.cause);
+    case "Initial":
+      return Exit.die(
+        new Cause.NoSuchElementError("Atom runtime is not available yet")
+      );
+  }
+};
 
 /**
  * Creates an Atom-owned XState actor reference.
@@ -66,6 +87,12 @@ export const actorRefAtom = <TLogic extends AnyActorLogic>(
       createActor(config.logic, config.options)
     );
     registerActorSystemRegistry(actor.system, get.registry);
+    if (config.runtime !== undefined) {
+      registerActorSystemRuntimeContext(actor.system, () => {
+        const result = get.registry.get(config.runtime!);
+        return runtimeContextExit(result);
+      });
+    }
     actor.start();
     get.addFinalizer(() => {
       actor.stop();

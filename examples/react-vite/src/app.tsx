@@ -10,6 +10,7 @@ import {
   persistedCheckoutAtom,
   quantityAtom,
   quoteAtom,
+  tickerAtom,
 } from "./domain";
 
 const formatCurrency = (config: { readonly value: number }): string =>
@@ -37,6 +38,7 @@ export const App = (): ReactElement => {
   const canPay = useAtomValue(canPayAtom);
   const payment = useAtomValue(paymentAtom);
   const persisted = useAtomValue(persistedCheckoutAtom);
+  const ticker = useAtomValue(tickerAtom);
   const send = useAtomSet(checkoutActor);
   return (
     <main className="shell">
@@ -45,8 +47,8 @@ export const App = (): ReactElement => {
         <h1>Small checkout flow</h1>
         <p>
           Quantity is an Effect Atom. The machine reads it through fromAtom,
-          prices it through fromEffect, and React reads the machine through
-          normal Atom hooks.
+          prices it through a custom Atom runtime service, and React reads the
+          machine through normal Atom hooks.
         </p>
       </section>
       <section className="grid">
@@ -103,6 +105,14 @@ export const App = (): ReactElement => {
                   : formatCurrency({ value: quote.total })}
               </strong>
             </div>
+            <div className="metric">
+              <span>Runtime service</span>
+              <strong>
+                {quote === null
+                  ? "Ready"
+                  : `${formatCurrency({ value: quote.unitPrice })} / unit`}
+              </strong>
+            </div>
           </div>
           <div className="action-row">
             <button
@@ -132,6 +142,30 @@ export const App = (): ReactElement => {
               Reset
             </button>
           </div>
+        </div>
+        <div className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">fromStream</p>
+              <h2>Scheduled stream</h2>
+            </div>
+            <RenderCount label="ticker" />
+          </div>
+          <div className="metric-row compact">
+            <div className="metric">
+              <span>Latest</span>
+              <strong>{ticker.latest}</strong>
+            </div>
+            <div className="metric">
+              <span>Items</span>
+              <strong>{ticker.count}</strong>
+            </div>
+          </div>
+          <ul className="activity-list">
+            {ticker.recent.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
         </div>
         <div className="panel">
           <div className="panel-header">
