@@ -159,6 +159,7 @@ describe("fromAtom", () => {
       readonly type: "atom.changed";
       readonly value: number;
     }>();
+    expect(actorAtom).type.toBeCallableWith({ logic });
   });
 
   it("turns read-only Atoms into actor logic without set payloads", () => {

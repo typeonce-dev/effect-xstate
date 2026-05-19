@@ -14,6 +14,10 @@ import {
   type Snapshot,
   type SnapshotFrom,
 } from "xstate";
+import {
+  registerActorSystemRegistry,
+  withActorSystemRegistry,
+} from "./from-atom";
 
 export type ActorAtomOptions<TLogic extends AnyActorLogic> =
   ActorOptions<TLogic> & {
@@ -58,7 +62,10 @@ export const actorRefAtom = <TLogic extends AnyActorLogic>(
   config: ActorAtomConfig<TLogic>
 ): Atom.Atom<Actor<TLogic>> =>
   Atom.make((get) => {
-    const actor = createActor(config.logic, config.options);
+    const actor = withActorSystemRegistry(get.registry, () =>
+      createActor(config.logic, config.options)
+    );
+    registerActorSystemRegistry(actor.system, get.registry);
     actor.start();
     get.addFinalizer(() => {
       actor.stop();

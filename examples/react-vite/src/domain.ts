@@ -44,7 +44,6 @@ export const checkoutMachine = setup({
   actors: {
     quantity: fromAtom({
       atom: quantityAtom,
-      registry,
     }),
     pricing: fromEffect({
       effect: (scope: { readonly input: { readonly quantity: number } }) =>

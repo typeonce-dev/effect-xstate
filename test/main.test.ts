@@ -1,6 +1,6 @@
 import { Cause, Effect, Option, Stream } from "effect";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
-import { createActor, assign, emit, setup } from "xstate";
+import { createActor, assign, emit, sendTo, setup } from "xstate";
 import { describe, expect, it, vi } from "vitest";
 import {
   actorAtom,
@@ -268,6 +268,170 @@ describe("fromStream", () => {
 });
 
 describe("fromAtom", () => {
+  it("uses the active actorAtom registry without explicitly passing it", async () => {
+    const registry = AtomRegistry.make();
+    const count = Atom.make(0);
+    const countActor = actorAtom({ logic: fromAtom({ atom: count }) });
+    const unmount = registry.mount(countActor);
+
+    expect(registry.get(countActor)).toMatchObject({
+      status: "active",
+      context: 0,
+    });
+
+    registry.set(count, 2);
+    await vi.waitFor(() => {
+      expect(registry.get(countActor).context).toBe(2);
+    });
+
+    registry.set(countActor, { type: "atom.set", value: 5 });
+
+    expect(registry.get(count)).toBe(5);
+    expect(registry.get(countActor).context).toBe(5);
+
+    unmount();
+  });
+
+  it("keeps automatic registries isolated across actorAtom mounts", async () => {
+    const leftRegistry = AtomRegistry.make();
+    const rightRegistry = AtomRegistry.make();
+    const count = Atom.make(0);
+    const countActor = actorAtom({ logic: fromAtom({ atom: count }) });
+    const unmountLeftCount = leftRegistry.mount(count);
+    const unmountRightCount = rightRegistry.mount(count);
+    const unmountLeftActor = leftRegistry.mount(countActor);
+    const unmountRightActor = rightRegistry.mount(countActor);
+
+    expect(leftRegistry.get(countActor).context).toBe(0);
+    expect(rightRegistry.get(countActor).context).toBe(0);
+
+    leftRegistry.set(count, 2);
+    await vi.waitFor(() => {
+      expect(leftRegistry.get(countActor).context).toBe(2);
+    });
+    expect(rightRegistry.get(countActor).context).toBe(0);
+
+    rightRegistry.set(count, 10);
+    await vi.waitFor(() => {
+      expect(rightRegistry.get(countActor).context).toBe(10);
+    });
+    expect(leftRegistry.get(countActor).context).toBe(2);
+
+    leftRegistry.set(countActor, { type: "atom.set", value: 3 });
+
+    expect(leftRegistry.get(count)).toBe(3);
+    expect(rightRegistry.get(count)).toBe(10);
+    expect(leftRegistry.get(countActor).context).toBe(3);
+    expect(rightRegistry.get(countActor).context).toBe(10);
+
+    unmountRightActor();
+    unmountLeftActor();
+    unmountRightCount();
+    unmountLeftCount();
+  });
+
+  it("uses the actorAtom registry for fromAtom actors invoked by a machine", async () => {
+    const registry = AtomRegistry.make();
+    const count = Atom.make(0);
+    const machine = setup({
+      types: {
+        context: {} as { readonly observed: number },
+        events: {} as { readonly type: "count.set"; readonly value: number },
+      },
+      actors: {
+        count: fromAtom({ atom: count }),
+      },
+    }).createMachine({
+      context: { observed: -1 },
+      invoke: {
+        id: "count",
+        src: "count",
+        onSnapshot: {
+          actions: assign({
+            observed: ({ event }) => event.snapshot.context,
+          }),
+        },
+      },
+      on: {
+        "count.set": {
+          actions: sendTo("count", ({ event }) => ({
+            type: "atom.set",
+            value: event.value,
+          })),
+        },
+      },
+    });
+    const machineAtom = actorAtom({ logic: machine });
+    const unmount = registry.mount(machineAtom);
+
+    await vi.waitFor(() => {
+      expect(registry.get(machineAtom).context.observed).toBe(0);
+    });
+
+    registry.set(count, 3);
+    await vi.waitFor(() => {
+      expect(registry.get(machineAtom).context.observed).toBe(3);
+    });
+
+    registry.set(machineAtom, { type: "count.set", value: 7 });
+
+    expect(registry.get(count)).toBe(7);
+    await vi.waitFor(() => {
+      expect(registry.get(machineAtom).context.observed).toBe(7);
+    });
+
+    unmount();
+  });
+
+  it("keeps an explicit fromAtom registry as an override", async () => {
+    const actorRegistry = AtomRegistry.make();
+    const explicitRegistry = AtomRegistry.make();
+    const count = Atom.make(0);
+    explicitRegistry.set(count, 10);
+    const unmountActorCount = actorRegistry.mount(count);
+    actorRegistry.set(count, 1);
+    const countActor = actorAtom({
+      logic: fromAtom({ atom: count, registry: explicitRegistry }),
+    });
+    const unmount = actorRegistry.mount(countActor);
+
+    expect(actorRegistry.get(countActor).context).toBe(10);
+
+    actorRegistry.set(count, 20);
+    await Effect.runPromise(Effect.yieldNow);
+    expect(actorRegistry.get(countActor).context).toBe(10);
+
+    explicitRegistry.set(count, 11);
+    await vi.waitFor(() => {
+      expect(actorRegistry.get(countActor).context).toBe(11);
+    });
+
+    actorRegistry.set(countActor, { type: "atom.set", value: 12 });
+
+    expect(explicitRegistry.get(count)).toBe(12);
+    expect(actorRegistry.get(count)).toBe(20);
+
+    unmount();
+    unmountActorCount();
+  });
+
+  it("uses a stable private registry when created outside actorAtom", () => {
+    let runs = 0;
+    const value = Atom.make(() => {
+      runs += 1;
+      return runs;
+    });
+    const actor = createActor(fromAtom({ atom: value })).start();
+
+    expect(actor.getSnapshot().context).toBe(1);
+
+    actor.send({ type: "atom.refresh" });
+
+    expect(actor.getSnapshot().context).toBe(2);
+
+    actor.stop();
+  });
+
   it("mirrors writable Atom changes in both directions", async () => {
     const registry = AtomRegistry.make();
     const count = Atom.make(0);

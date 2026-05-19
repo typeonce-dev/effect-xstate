@@ -1,5 +1,5 @@
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
-import type { ActorLogic, AnyActorRef } from "xstate";
+import type { ActorLogic, AnyActorRef, AnyActorScope } from "xstate";
 
 export type AtomChangedEvent<A> = {
   readonly type: "atom.changed";
@@ -53,6 +53,33 @@ export type FromAtomConfig<A, W = never> = {
 
 const subscriptions = new WeakMap<AnyActorRef, () => void>();
 
+const registryBySystem = new WeakMap<
+  AnyActorScope["system"],
+  AtomRegistry.AtomRegistry
+>();
+
+let currentRegistry: AtomRegistry.AtomRegistry | undefined;
+
+export const registerActorSystemRegistry = (
+  system: AnyActorScope["system"],
+  registry: AtomRegistry.AtomRegistry
+): void => {
+  registryBySystem.set(system, registry);
+};
+
+export const withActorSystemRegistry = <A>(
+  registry: AtomRegistry.AtomRegistry,
+  evaluate: () => A
+): A => {
+  const previous = currentRegistry;
+  currentRegistry = registry;
+  try {
+    return evaluate();
+  } finally {
+    currentRegistry = previous;
+  }
+};
+
 const active = <A>(context: A): AtomActorSnapshot<A> => ({
   status: "active",
   output: undefined,
@@ -71,9 +98,9 @@ const stopped = <A>(context: A): AtomActorSnapshot<A> => ({
  * Converts an Effect Atom into XState actor logic.
  *
  * Use this when a machine should invoke and react to a value already owned by
- * the Atom graph. Sharing the same `AtomRegistry` lets React, Effect code, and
- * the invoked XState actor observe the same live atom instance without a manual
- * synchronization layer.
+ * the Atom graph. When used under `actorAtom`, the invoked actor automatically
+ * uses the active `AtomRegistry`, so React, Effect code, and XState observe the
+ * same live atom instance without a manual synchronization layer.
  *
  * Writable atoms also accept `atom.set` events, so machines can update Atom
  * state through the actor protocol when that is the desired ownership boundary.
@@ -82,14 +109,23 @@ const stopped = <A>(context: A): AtomActorSnapshot<A> => ({
  * @category conversions
  * @example
  * const quantityActor = fromAtom({
- *   atom: quantityAtom,
- *   registry
+ *   atom: quantityAtom
  * })
  */
 export function fromAtom<A, W = never>(
   config: FromAtomConfig<A, W>
 ): ActorLogic<AtomActorSnapshot<A>, AtomActorEvent<A, W>, void> {
-  const registry = config.registry ?? AtomRegistry.make();
+  let fallbackRegistry: AtomRegistry.AtomRegistry | undefined;
+  const getFallbackRegistry = () => {
+    fallbackRegistry ??= AtomRegistry.make();
+    return fallbackRegistry;
+  };
+  const getRegistry = (actorScope: AnyActorScope) =>
+    config.registry ??
+    registryBySystem.get(actorScope.system) ??
+    currentRegistry ??
+    getFallbackRegistry();
+
   return {
     transition: (snapshot, event: AtomInternalEvent<A, W>, actorScope) => {
       if (event.type === "atom.changed") {
@@ -102,6 +138,7 @@ export function fromAtom<A, W = never>(
         if (snapshot.status !== "active") {
           return snapshot;
         }
+        const registry = getRegistry(actorScope);
         registry.refresh(config.atom);
         return active(registry.get(config.atom));
       }
@@ -109,6 +146,7 @@ export function fromAtom<A, W = never>(
         if (snapshot.status !== "active") {
           return snapshot;
         }
+        const registry = getRegistry(actorScope);
         registry.set(config.atom, event.value);
         return active(registry.get(config.atom));
       }
@@ -119,8 +157,10 @@ export function fromAtom<A, W = never>(
       }
       return snapshot;
     },
-    getInitialSnapshot: () => active(registry.get(config.atom)),
+    getInitialSnapshot: (actorScope) =>
+      active(getRegistry(actorScope).get(config.atom)),
     start: (_snapshot, actorScope) => {
+      const registry = getRegistry(actorScope);
       const unsubscribe = registry.subscribe(
         config.atom,
         (value) => {
