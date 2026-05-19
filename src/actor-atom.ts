@@ -1,4 +1,4 @@
-import { Option } from "effect";
+import { Cause, Option } from "effect";
 import { Atom } from "effect/unstable/reactivity";
 import {
   createActor,
@@ -45,9 +45,10 @@ export type ActorAtomConfig<TLogic extends AnyActorLogic> = {
 export type ActorAtomRuntimeConfig<
   TLogic extends AnyActorLogic,
   R,
+  ER,
 > = {
   readonly logic: TLogic;
-  readonly runtime: RuntimeAtom<R, any>;
+  readonly runtime: RuntimeAtom<R, ER>;
 } & RuntimeConstraint<TLogic, R> &
   ConditionalRequired<
     {
@@ -60,6 +61,27 @@ export interface ActorAtom<TLogic extends AnyActorLogic> extends Atom.Writable<
   SnapshotFrom<TLogic>,
   EventFromLogic<TLogic>
 > {
+  readonly actor: Atom.Atom<Actor<TLogic>>;
+}
+
+export type SnapshotWithRuntimeError<TSnapshot, ER> = TSnapshot extends {
+  readonly status: "error";
+  readonly error: Cause.Cause<infer E>;
+  readonly cause: Cause.Cause<infer E2>;
+}
+  ? Omit<TSnapshot, "error" | "cause"> & {
+      readonly error: Cause.Cause<E | E2 | ER>;
+      readonly cause: Cause.Cause<E | E2 | ER>;
+    }
+  : TSnapshot;
+
+export interface RuntimeActorAtom<
+  TLogic extends AnyActorLogic,
+  ER,
+> extends Atom.Writable<
+    SnapshotWithRuntimeError<SnapshotFrom<TLogic>, ER>,
+    EventFromLogic<TLogic>
+  > {
   readonly actor: Atom.Atom<Actor<TLogic>>;
 }
 
@@ -84,11 +106,11 @@ export type EmittedSelection<
 export function actorRefAtom<TLogic extends AnyActorLogic>(
   config: ActorAtomConfig<TLogic>
 ): Atom.Atom<Actor<TLogic>>;
-export function actorRefAtom<TLogic extends AnyActorLogic, R>(
-  config: ActorAtomRuntimeConfig<TLogic, R>
+export function actorRefAtom<TLogic extends AnyActorLogic, R, ER>(
+  config: ActorAtomRuntimeConfig<TLogic, R, ER>
 ): Atom.Atom<Actor<TLogic>>;
 export function actorRefAtom<TLogic extends AnyActorLogic>(
-  config: ActorAtomConfig<TLogic> | ActorAtomRuntimeConfig<TLogic, any>
+  config: ActorAtomConfig<TLogic> | ActorAtomRuntimeConfig<TLogic, any, any>
 ): Atom.Atom<Actor<TLogic>> {
   return Atom.make((get) => {
     const actor = withActorSystemRegistry(get.registry, () =>
@@ -136,12 +158,12 @@ export function actorRefAtom<TLogic extends AnyActorLogic>(
 export function actorAtom<TLogic extends AnyActorLogic>(
   config: ActorAtomConfig<TLogic>
 ): ActorAtom<TLogic>;
-export function actorAtom<TLogic extends AnyActorLogic, R>(
-  config: ActorAtomRuntimeConfig<TLogic, R>
-): ActorAtom<TLogic>;
+export function actorAtom<TLogic extends AnyActorLogic, R, ER>(
+  config: ActorAtomRuntimeConfig<TLogic, R, ER>
+): RuntimeActorAtom<TLogic, ER>;
 export function actorAtom<TLogic extends AnyActorLogic>(
-  config: ActorAtomConfig<TLogic> | ActorAtomRuntimeConfig<TLogic, any>
-): ActorAtom<TLogic> {
+  config: ActorAtomConfig<TLogic> | ActorAtomRuntimeConfig<TLogic, any, any>
+): ActorAtom<TLogic> | RuntimeActorAtom<TLogic, any> {
   const actor = actorRefAtom(config);
   const snapshot = Atom.writable<SnapshotFrom<TLogic>, EventFromLogic<TLogic>>(
     (get) => {

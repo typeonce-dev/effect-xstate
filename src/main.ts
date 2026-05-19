@@ -10,7 +10,9 @@ export type {
   ActorAtomConfig,
   ActorAtomOptions,
   EmittedSelection,
+  RuntimeActorAtom,
   RuntimeAtom,
+  SnapshotWithRuntimeError,
 } from "./actor-atom";
 export { fromAtom } from "./from-atom";
 export type {

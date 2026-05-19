@@ -38,14 +38,14 @@ export type AtomActorSnapshot<A> =
       readonly status: "stopped";
       readonly output: undefined;
       readonly error: undefined;
-      readonly context: A;
+      readonly context: A | undefined;
     }
   | {
       readonly status: "error";
       readonly output: undefined;
       readonly error: Cause.Cause<unknown>;
       readonly cause: Cause.Cause<unknown>;
-      readonly context: A;
+      readonly context: A | undefined;
     };
 
 export type FromAtomConfig<A, W = never> = {
@@ -92,7 +92,7 @@ const active = <A>(context: A): AtomActorSnapshot<A> => ({
   context,
 });
 
-const stopped = <A>(context: A): AtomActorSnapshot<A> => ({
+const stopped = <A>(context: A | undefined): AtomActorSnapshot<A> => ({
   status: "stopped",
   output: undefined,
   error: undefined,
@@ -100,7 +100,7 @@ const stopped = <A>(context: A): AtomActorSnapshot<A> => ({
 });
 
 const failed = <A>(
-  context: A,
+  context: A | undefined,
   cause: Cause.Cause<unknown>
 ): AtomActorSnapshot<A> => ({
   status: "error",
@@ -110,11 +110,21 @@ const failed = <A>(
   context,
 });
 
-const tryCause = <A>(evaluate: () => A): A | Cause.Cause<unknown> => {
+type TryResult<A> =
+  | {
+      readonly _tag: "Success";
+      readonly value: A;
+    }
+  | {
+      readonly _tag: "Failure";
+      readonly cause: Cause.Cause<unknown>;
+    };
+
+const tryCause = <A>(evaluate: () => A): TryResult<A> => {
   try {
-    return evaluate();
+    return { _tag: "Success", value: evaluate() };
   } catch (error) {
-    return Cause.die(error);
+    return { _tag: "Failure", cause: Cause.die(error) };
   }
 };
 
@@ -156,7 +166,7 @@ export function fromAtom<A, W = never>(
         if (snapshot.status !== "active") {
           return snapshot;
         }
-        return active(event.value);
+        return active<A>(event.value);
       }
       if (event.type === "atom.refresh") {
         if (snapshot.status !== "active") {
@@ -167,7 +177,9 @@ export function fromAtom<A, W = never>(
           registry.refresh(config.atom);
           return registry.get(config.atom);
         });
-        return Cause.isCause(next) ? failed(snapshot.context, next) : active(next);
+        return next._tag === "Failure"
+          ? failed<A>(snapshot.context, next.cause)
+          : active<A>(next.value);
       }
       if (event.type === "atom.set" && Atom.isWritable(config.atom)) {
         if (snapshot.status !== "active") {
@@ -179,7 +191,9 @@ export function fromAtom<A, W = never>(
           registry.set(atom, event.value);
           return registry.get(atom);
         });
-        return Cause.isCause(next) ? failed(snapshot.context, next) : active(next);
+        return next._tag === "Failure"
+          ? failed<A>(snapshot.context, next.cause)
+          : active<A>(next.value);
       }
       if (event.type === "xstate.stop") {
         subscriptions.get(actorScope.self)?.();
@@ -190,9 +204,9 @@ export function fromAtom<A, W = never>(
     },
     getInitialSnapshot: (actorScope) => {
       const initial = tryCause(() => getRegistry(actorScope).get(config.atom));
-      return Cause.isCause(initial)
-        ? failed(undefined as A, initial)
-        : active(initial);
+      return initial._tag === "Failure"
+        ? failed<A>(undefined, initial.cause)
+        : active<A>(initial.value);
     },
     start: (_snapshot, actorScope) => {
       const registry = getRegistry(actorScope);
@@ -212,8 +226,8 @@ export function fromAtom<A, W = never>(
           { immediate: true }
         )
       );
-      if (!Cause.isCause(unsubscribe)) {
-        subscriptions.set(actorScope.self, unsubscribe);
+      if (unsubscribe._tag === "Success") {
+        subscriptions.set(actorScope.self, unsubscribe.value);
       }
     },
     getPersistedSnapshot: (snapshot) => snapshot,

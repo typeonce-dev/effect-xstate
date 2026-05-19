@@ -4,6 +4,7 @@ import type {
   ActorOptions,
   AnyActorLogic,
   ConditionalRequired,
+  InputFrom,
   IsNotNever,
   RequiredActorOptionsKeys,
 } from "xstate";
@@ -11,8 +12,9 @@ import { createActor } from "xstate";
 import {
   actorAtom,
   actorRefAtom,
-  type ActorAtom,
+  type ActorAtomRuntimeConfig,
   type ActorAtomOptions,
+  type RuntimeActorAtom,
 } from "./actor-atom";
 import { registerActorSystemRuntimeContext } from "./actor-system-runtime";
 import type { RuntimeConstraint } from "./internal";
@@ -39,7 +41,7 @@ export type XStateRuntimeActorConfig<
   ConditionalRequired<
     {
       readonly options?: ActorOptions<TLogic> & {
-        readonly [K in RequiredActorOptionsKeys<TLogic>]: unknown;
+        readonly [K in RequiredActorOptionsKeys<TLogic>]: InputFrom<TLogic>;
       };
     },
     IsNotNever<RequiredActorOptionsKeys<TLogic>>
@@ -56,7 +58,7 @@ export interface XStateRuntime<R, ER> extends Atom.AtomRuntime<R, ER> {
         },
         IsNotNever<RequiredActorOptionsKeys<TLogic>>
       >
-  ) => ActorAtom<TLogic>;
+  ) => RuntimeActorAtom<TLogic, ER>;
   readonly actorRefAtom: <TLogic extends AnyActorLogic>(
     config: {
       readonly logic: TLogic;
@@ -82,15 +84,21 @@ export const runtime = <R, ER>(
         readonly logic: TLogic;
         readonly options?: ActorAtomOptions<TLogic>;
       }
-    ) => actorAtom({ ...config, runtime: atomRuntime } as any) as ActorAtom<TLogic>,
+    ) =>
+      actorAtom({
+        ...config,
+        runtime: atomRuntime,
+      } as ActorAtomRuntimeConfig<TLogic, R, ER>) as RuntimeActorAtom<TLogic, ER>,
     actorRefAtom: <TLogic extends AnyActorLogic>(
       config: {
         readonly logic: TLogic;
         readonly options?: ActorAtomOptions<TLogic>;
       }
-    ) => actorRefAtom({ ...config, runtime: atomRuntime } as any) as Atom.Atom<
-      Actor<TLogic>
-    >,
+    ) =>
+      actorRefAtom({
+        ...config,
+        runtime: atomRuntime,
+      } as ActorAtomRuntimeConfig<TLogic, R, ER>) as Atom.Atom<Actor<TLogic>>,
     createActor: <TLogic extends AnyActorLogic>(
       config: XStateRuntimeActorConfig<TLogic, R>
     ) => {

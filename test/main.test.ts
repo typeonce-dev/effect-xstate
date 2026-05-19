@@ -610,7 +610,10 @@ describe("fromAtom", () => {
         src: "count",
         onSnapshot: {
           actions: assign({
-            observed: ({ event }) => event.snapshot.context,
+            observed: ({ context, event }) =>
+              event.snapshot.status === "active"
+                ? event.snapshot.context
+                : context.observed,
           }),
         },
       },
@@ -690,6 +693,27 @@ describe("fromAtom", () => {
     actor.send({ type: "atom.refresh" });
 
     expect(actor.getSnapshot().context).toBe(2);
+
+    actor.stop();
+  });
+
+  it("does not fabricate context when the initial Atom read fails", () => {
+    const defect = new Error("atom boom");
+    const value = Atom.make(() => {
+      throw defect;
+    });
+    const actor = createActor(fromAtom({ atom: value }));
+
+    actor.subscribe({ error: () => {} });
+    actor.start();
+
+    const snapshot = actor.getSnapshot();
+    expect(snapshot.status).toBe("error");
+    expect(snapshot.context).toBeUndefined();
+    if (snapshot.status !== "error") {
+      throw new Error("Expected error snapshot");
+    }
+    expect(Cause.hasDies(snapshot.cause)).toBe(true);
 
     actor.stop();
   });

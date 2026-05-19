@@ -1,5 +1,5 @@
 import { Cause, Context, Effect, Layer, Option, Stream } from "effect";
-import { Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { describe, expect, it } from "tstyche";
 import {
   type EmittedFrom,
@@ -116,6 +116,29 @@ describe("fromEffect", () => {
       logic,
       options: { input: { quantity: 1 } },
     });
+  });
+
+  it("includes Atom runtime failures in runtime-backed actor Atom snapshots", () => {
+    const runtimeAtom = Atom.make<
+      AsyncResult.AsyncResult<Context.Context<PricingService>, "runtime failed">
+    >(
+      AsyncResult.failure<Context.Context<PricingService>, "runtime failed">(
+        Cause.fail("runtime failed" as const)
+      )
+    );
+    const logic = fromEffect({
+      effect: () => Effect.fail({ _tag: "PricingError" as const }),
+    });
+    const actor = actorAtom({ logic, runtime: runtimeAtom });
+
+    expect<
+      Extract<
+        Atom.Type<typeof actor>,
+        { readonly status: "error" }
+      >["error"]
+    >().type.toBe<
+      Cause.Cause<{ _tag: "PricingError" } | "runtime failed">
+    >();
   });
 
   it("propagates invoked Effect service requirements through machines", () => {
@@ -280,6 +303,15 @@ describe("fromAtom", () => {
     expect<EventFromLogic<typeof logic>>().type.toBe<
       AtomActorEvent<string, never>
     >();
+  });
+
+  it("does not claim an Atom context exists on initial read failure", () => {
+    expect<
+      Extract<
+        AtomActorSnapshot<number>,
+        { readonly status: "error" }
+      >["context"]
+    >().type.toBe<number | undefined>();
   });
 });
 
