@@ -1,6 +1,14 @@
-import { Cause, Context, Effect, Layer, Stream } from "effect";
+import { Cause, Context, Effect, Layer, Option, Stream } from "effect";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
-import { createActor, setup, type Actor } from "xstate";
+import {
+  assign,
+  createActor,
+  emit,
+  setup,
+  stopChild,
+  type Actor,
+  type ActorRefFrom,
+} from "xstate";
 import { describe, expect, it, vi } from "vitest";
 import {
   actorAtom,
@@ -883,6 +891,527 @@ describe("Atom-owned actor lifecycle", () => {
     await vi.waitFor(() => {
       expect(finalized).toEqual(new Set([1, 2, 3]));
     });
+  });
+
+  it("stops N runtime-backed spawned children when an Atom-owned parent finalizes", async () => {
+    class Service extends Context.Service<Service, object>()(
+      "test/DynamicSpawnRuntimeService"
+    ) {}
+    const runtime = xstateRuntime(Atom.runtime(Layer.succeed(Service, {})));
+    const finalized = new Set<number>();
+    const child = fromEffect({
+      effect: ({ input }: { readonly input: number }) =>
+        Effect.gen(function* () {
+          yield* Service;
+          return yield* Effect.never.pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                finalized.add(input);
+              })
+            )
+          );
+        }),
+    });
+    const machine = setup({
+      types: {
+        context: {} as {
+          readonly children: ReadonlyArray<ActorRefFrom<typeof child>>;
+        },
+        input: {} as { readonly count: number },
+      },
+      actors: {
+        child,
+      },
+    }).createMachine({
+      context: ({ input, spawn }) => ({
+        children: Array.from({ length: input.count }, (_, index) =>
+          spawn("child", { id: `child-${index}`, input: index })
+        ),
+      }),
+    });
+    const registry = AtomRegistry.make();
+    const parent = runtime.actorAtom({
+      logic: machine,
+      options: { input: { count: 5 } },
+    });
+    const unmount = registry.mount(parent);
+    const children = registry.get(parent).context.children;
+
+    expect(children).toHaveLength(5);
+    expect(children.map((actor) => actor.getSnapshot().status)).toEqual([
+      "active",
+      "active",
+      "active",
+      "active",
+      "active",
+    ]);
+
+    unmount();
+
+    await vi.waitFor(() => {
+      expect(finalized).toEqual(new Set([0, 1, 2, 3, 4]));
+    });
+    expect(children.map((actor) => actor.getSnapshot().status)).toEqual([
+      "stopped",
+      "stopped",
+      "stopped",
+      "stopped",
+      "stopped",
+    ]);
+  });
+
+  it("keeps separate actorAtoms independent when they share the same machine logic", () => {
+    const machine = setup({
+      types: {
+        context: {} as { readonly count: number },
+        events: {} as { readonly type: "increment"; readonly by: number },
+      },
+    }).createMachine({
+      context: { count: 0 },
+      on: {
+        increment: {
+          actions: assign({
+            count: ({ context, event }) => context.count + event.by,
+          }),
+        },
+      },
+    });
+    const registry = AtomRegistry.make();
+    const first = actorAtom({ logic: machine });
+    const second = actorAtom({ logic: machine });
+    const unmountFirst = registry.mount(first);
+    const unmountSecond = registry.mount(second);
+
+    expect(registry.get(first.actor)).not.toBe(registry.get(second.actor));
+
+    registry.set(first, { type: "increment", by: 2 });
+    registry.set(second, { type: "increment", by: 5 });
+
+    expect(registry.get(first).context.count).toBe(2);
+    expect(registry.get(second).context.count).toBe(5);
+
+    unmountSecond();
+    unmountFirst();
+  });
+
+  it("updates extraction atoms when a parent with spawned children stops", async () => {
+    const child = fromEffect({
+      effect: () => Effect.never,
+    });
+    const machine = setup({
+      types: {
+        context: {} as {
+          readonly children: ReadonlyArray<ActorRefFrom<typeof child>>;
+        },
+      },
+      actors: {
+        child,
+      },
+    }).createMachine({
+      context: ({ spawn }) => ({
+        children: [spawn("child", { id: "child" })],
+      }),
+    });
+    const registry = AtomRegistry.make();
+    const parent = actorAtom({ logic: machine });
+    const childStatuses = selectAtom({
+      actor: parent,
+      selector: (snapshot) =>
+        snapshot.context.children.map((actor) => actor.getSnapshot().status),
+    });
+    const persisted = persistedAtom({ actor: parent });
+    const unmountParent = registry.mount(parent);
+    const unmountStatuses = registry.mount(childStatuses);
+    const unmountPersisted = registry.mount(persisted);
+    const parentActor = registry.get(parent.actor);
+
+    expect(registry.get(childStatuses)).toEqual(["active"]);
+
+    parentActor.stop();
+
+    await vi.waitFor(() => {
+      expect(registry.get(parent).status).toBe("stopped");
+      expect(registry.get(childStatuses)).toEqual(["stopped"]);
+      expect(registry.get(persisted).status).toBe("stopped");
+    });
+
+    unmountPersisted();
+    unmountStatuses();
+    unmountParent();
+  });
+
+  it("keeps the parent actor alive when only extraction atoms unmount", () => {
+    const machine = setup({
+      types: {
+        context: {} as { readonly count: number },
+        events: {} as { readonly type: "increment"; readonly by: number },
+        emitted: {} as { readonly type: "count.changed"; readonly count: number },
+      },
+    }).createMachine({
+      context: { count: 0 },
+      on: {
+        increment: {
+          actions: [
+            assign({
+              count: ({ context, event }) => context.count + event.by,
+            }),
+            emit(({ context }) => ({
+              type: "count.changed",
+              count: context.count,
+            })),
+          ],
+        },
+      },
+    });
+    const registry = AtomRegistry.make();
+    const parent = actorAtom({ logic: machine });
+    const selected = selectAtom({
+      actor: parent,
+      selector: (snapshot) => snapshot.context.count,
+    });
+    const emitted = emittedAtom({ actor: parent, type: "count.changed" });
+    const persisted = persistedAtom({ actor: parent });
+    const unmountParent = registry.mount(parent);
+    const unmountSelected = registry.mount(selected);
+    const unmountEmitted = registry.mount(emitted);
+    const unmountPersisted = registry.mount(persisted);
+
+    expect(registry.get(selected)).toBe(0);
+    expect(Option.isNone(registry.get(emitted))).toBe(true);
+    expect(registry.get(persisted)).toMatchObject({ context: { count: 0 } });
+
+    unmountSelected();
+    unmountEmitted();
+    unmountPersisted();
+
+    registry.set(parent, { type: "increment", by: 3 });
+
+    expect(registry.get(parent).context.count).toBe(3);
+
+    unmountParent();
+  });
+
+  it("keeps children alive while extraction atoms still depend on an unmounted parent atom", async () => {
+    const finalized = vi.fn();
+    const child = fromEffect({
+      effect: () =>
+        Effect.never.pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              finalized();
+            })
+          )
+        ),
+    });
+    const machine = setup({
+      types: {
+        context: {} as {
+          readonly children: ReadonlyArray<ActorRefFrom<typeof child>>;
+        },
+      },
+      actors: {
+        child,
+      },
+    }).createMachine({
+      context: ({ spawn }) => ({
+        children: [spawn("child", { id: "child" })],
+      }),
+    });
+    const registry = AtomRegistry.make();
+    const parent = actorAtom({ logic: machine });
+    const childStatuses = selectAtom({
+      actor: parent,
+      selector: (snapshot) =>
+        snapshot.context.children.map((actor) => actor.getSnapshot().status),
+    });
+    const persisted = persistedAtom({ actor: parent });
+    const unmountParent = registry.mount(parent);
+    const unmountStatuses = registry.mount(childStatuses);
+    const unmountPersisted = registry.mount(persisted);
+
+    expect(registry.get(childStatuses)).toEqual(["active"]);
+
+    unmountParent();
+
+    expect(registry.get(childStatuses)).toEqual(["active"]);
+    expect(registry.get(persisted).status).toBe("active");
+    expect(finalized).not.toHaveBeenCalled();
+
+    unmountPersisted();
+    unmountStatuses();
+
+    await vi.waitFor(() => {
+      expect(finalized).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("does not double-finalize a spawned child stopped before its parent", async () => {
+    const finalized = new Map<string, number>();
+    const incrementFinalized = (id: string) => {
+      finalized.set(id, (finalized.get(id) ?? 0) + 1);
+    };
+    const child = fromEffect({
+      effect: ({ input }: { readonly input: string }) =>
+        Effect.never.pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              incrementFinalized(input);
+            })
+          )
+        ),
+    });
+    const machine = setup({
+      types: {
+        context: {} as {
+          readonly first: ActorRefFrom<typeof child>;
+          readonly second: ActorRefFrom<typeof child>;
+        },
+        events: {} as { readonly type: "stop.first" },
+      },
+      actors: {
+        child,
+      },
+    }).createMachine({
+      context: ({ spawn }) => ({
+        first: spawn("child", { id: "first", input: "first" }),
+        second: spawn("child", { id: "second", input: "second" }),
+      }),
+      on: {
+        "stop.first": {
+          actions: stopChild(({ context }) => context.first),
+        },
+      },
+    });
+    const registry = AtomRegistry.make();
+    const parent = actorAtom({ logic: machine });
+    const unmount = registry.mount(parent);
+    const parentActor = registry.get(parent.actor);
+    const { first, second } = registry.get(parent).context;
+
+    registry.set(parent, { type: "stop.first" });
+
+    await vi.waitFor(() => {
+      expect(first.getSnapshot().status).toBe("stopped");
+      expect(finalized).toEqual(new Map([["first", 1]]));
+    });
+
+    parentActor.stop();
+
+    await vi.waitFor(() => {
+      expect(second.getSnapshot().status).toBe("stopped");
+      expect(finalized).toEqual(
+        new Map([
+          ["first", 1],
+          ["second", 1],
+        ])
+      );
+    });
+
+    unmount();
+  });
+
+  it("isolates spawned child trees when the same actorAtom is mounted in different registries", async () => {
+    const finalized = new Map<string, number>();
+    const incrementFinalized = (id: string) => {
+      finalized.set(id, (finalized.get(id) ?? 0) + 1);
+    };
+    const child = fromEffect({
+      effect: ({ input }: { readonly input: string }) =>
+        Effect.never.pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              incrementFinalized(input);
+            })
+          )
+        ),
+    });
+    const machine = setup({
+      types: {
+        context: {} as { readonly child: ActorRefFrom<typeof child> },
+        input: {} as { readonly id: string },
+      },
+      actors: {
+        child,
+      },
+    }).createMachine({
+      context: ({ input, spawn }) => ({
+        child: spawn("child", { id: "child", input: input.id }),
+      }),
+    });
+    const leftRegistry = AtomRegistry.make();
+    const rightRegistry = AtomRegistry.make();
+    const parent = actorAtom({
+      logic: machine,
+      options: { input: { id: "shared-definition" } },
+    });
+    const unmountLeft = leftRegistry.mount(parent);
+    const unmountRight = rightRegistry.mount(parent);
+    const leftActor = leftRegistry.get(parent.actor);
+    const rightActor = rightRegistry.get(parent.actor);
+    const leftChild = leftRegistry.get(parent).context.child;
+    const rightChild = rightRegistry.get(parent).context.child;
+
+    expect(leftActor).not.toBe(rightActor);
+    expect(leftChild).not.toBe(rightChild);
+
+    unmountLeft();
+
+    await vi.waitFor(() => {
+      expect(leftChild.getSnapshot().status).toBe("stopped");
+      expect(rightChild.getSnapshot().status).toBe("active");
+      expect(finalized).toEqual(new Map([["shared-definition", 1]]));
+    });
+
+    unmountRight();
+
+    await vi.waitFor(() => {
+      expect(rightChild.getSnapshot().status).toBe("stopped");
+      expect(finalized).toEqual(new Map([["shared-definition", 2]]));
+    });
+  });
+
+  it("starts runtime-backed spawned children after a delayed Atom runtime resolves", async () => {
+    class Service extends Context.Service<Service, { readonly value: number }>()(
+      "test/DelayedSpawnRuntimeService"
+    ) {}
+    let runtimeResult: AsyncResult.AsyncResult<
+      Context.Context<Service>,
+      never
+    > = AsyncResult.initial(true);
+    const listeners = new Set<() => void>();
+    const child = fromEffect({
+      effect: () =>
+        Effect.gen(function* () {
+          const service = yield* Service;
+          return service.value;
+        }),
+    });
+    const machine = setup({
+      types: {
+        context: {} as { readonly child: ActorRefFrom<typeof child> },
+      },
+      actors: {
+        child,
+      },
+    }).createMachine({
+      context: ({ spawn }) => ({
+        child: spawn("child", { id: "child" }),
+      }),
+    });
+    const parent = createActor(machine);
+    const unregister = registerActorSystemRuntimeContext(parent.system, {
+      get: () => runtimeResult,
+      subscribe: (onChange) => {
+        listeners.add(onChange);
+        return () => {
+          listeners.delete(onChange);
+        };
+      },
+    });
+
+    parent.start();
+    const childRef = parent.getSnapshot().context.child;
+    expect(childRef.getSnapshot().status).toBe("active");
+    expect(childRef.getSnapshot().result._tag).toBe("Initial");
+    expect(listeners.size).toBe(1);
+
+    runtimeResult = AsyncResult.success(
+      Context.make(Service, Service.of({ value: 23 }))
+    );
+    listeners.forEach((listener) => listener());
+
+    await vi.waitFor(() => {
+      expect(childRef.getSnapshot()).toMatchObject({
+        status: "done",
+        output: 23,
+      });
+    });
+    expect(listeners.size).toBe(0);
+
+    unregister();
+    parent.stop();
+  });
+
+  it("persists a coherent parent snapshot when a spawned child stops with it", async () => {
+    const child = fromEffect({
+      effect: () => Effect.never,
+    });
+    const machine = setup({
+      types: {
+        context: {} as { readonly child: ActorRefFrom<typeof child> },
+      },
+      actors: {
+        child,
+      },
+    }).createMachine({
+      context: ({ spawn }) => ({
+        child: spawn("child", { id: "child" }),
+      }),
+    });
+    const registry = AtomRegistry.make();
+    const parent = actorAtom({ logic: machine });
+    const persisted = persistedAtom({ actor: parent });
+    const unmountParent = registry.mount(parent);
+    const unmountPersisted = registry.mount(persisted);
+    const parentActor = registry.get(parent.actor);
+    const childRef = registry.get(parent).context.child;
+
+    parentActor.stop();
+
+    await vi.waitFor(() => {
+      const snapshot = registry.get(persisted) as {
+        readonly status: string;
+      };
+      expect(snapshot.status).toBe("stopped");
+      expect(childRef.getSnapshot().status).toBe("stopped");
+    });
+
+    unmountPersisted();
+    unmountParent();
+  });
+
+  it("does not expose emitted events attempted after parent stop", async () => {
+    const machine = setup({
+      types: {
+        context: {} as { readonly count: number },
+        events: {} as { readonly type: "emit"; readonly count: number },
+        emitted: {} as { readonly type: "count.emitted"; readonly count: number },
+      },
+    }).createMachine({
+      context: { count: 0 },
+      on: {
+        emit: {
+          actions: emit(({ event }) => ({
+            type: "count.emitted",
+            count: event.count,
+          })),
+        },
+      },
+    });
+    const registry = AtomRegistry.make();
+    const parent = actorAtom({ logic: machine });
+    const emitted = emittedAtom({ actor: parent, type: "count.emitted" });
+    const unmountParent = registry.mount(parent);
+    const unmountEmitted = registry.mount(emitted);
+    const parentActor = registry.get(parent.actor);
+
+    registry.set(parent, { type: "emit", count: 1 });
+    expect(registry.get(emitted)).toEqual(
+      Option.some({ type: "count.emitted", count: 1 })
+    );
+
+    parentActor.stop();
+    parentActor.send({ type: "emit", count: 2 });
+
+    await vi.waitFor(() => {
+      expect(registry.get(parent).status).toBe("stopped");
+    });
+    expect(registry.get(emitted)).toEqual(
+      Option.some({ type: "count.emitted", count: 1 })
+    );
+
+    unmountEmitted();
+    unmountParent();
   });
 
   it("unsubscribes selector, emitted, and persisted atoms on finalization", async () => {

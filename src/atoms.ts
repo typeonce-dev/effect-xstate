@@ -179,6 +179,9 @@ export function actorAtom<TLogic extends AnyActorLogic>(
         error: () => {
           get.setSelf(actorRef.getSnapshot());
         },
+        complete: () => {
+          get.setSelf(actorRef.getSnapshot());
+        },
       });
       get.addFinalizer(() => {
         subscription.unsubscribe();
@@ -220,6 +223,13 @@ export const selectAtom = <TLogic extends AnyActorLogic, TSelected>(config: {
     const subscription = actorRef.subscribe({
       next: (snapshot) => {
         const next = config.selector(snapshot);
+        if (!equal(previous, next)) {
+          previous = next;
+          get.setSelf(next);
+        }
+      },
+      complete: () => {
+        const next = config.selector(actorRef.getSnapshot());
         if (!equal(previous, next)) {
           previous = next;
           get.setSelf(next);
