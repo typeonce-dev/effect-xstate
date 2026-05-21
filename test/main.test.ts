@@ -5,9 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 import {
   actorAtom,
   emittedAtom,
+  failureCause,
+  failureValue,
   fromAtom,
   fromEffect,
   fromStream,
+  isFailureSnapshot,
+  prettyCause,
   persistedAtom,
   runtime as xstateRuntime,
   selectAtom,
@@ -810,6 +814,68 @@ describe("fromAtom", () => {
       context: 0,
     });
     expect(registry.get(count)).toBe(0);
+  });
+});
+
+describe("failure helpers", () => {
+  it("extracts causes from Effect, Stream, and Atom actor snapshots", async () => {
+    const effectActor = createActor(
+      fromEffect({
+        effect: () => Effect.fail("effect failed" as const),
+      })
+    );
+    effectActor.subscribe({ error: () => {} });
+    effectActor.start();
+
+    const effectSnapshot = await waitForStatus(effectActor, "error");
+    expect(isFailureSnapshot(effectSnapshot)).toBe(true);
+    if (!isFailureSnapshot<"effect failed">(effectSnapshot)) {
+      throw new Error("Expected Effect failure snapshot");
+    }
+    expect(failureCause(effectSnapshot)).toEqual(Cause.fail("effect failed"));
+    expect(failureValue(effectSnapshot)).toBe("effect failed");
+    expect(prettyCause(failureCause(effectSnapshot))).toContain(
+      "effect failed"
+    );
+
+    const streamActor = createActor(
+      fromStream({
+        stream: () => Stream.fail("stream failed" as const),
+      })
+    );
+    streamActor.subscribe({ error: () => {} });
+    streamActor.start();
+
+    const streamSnapshot = await waitForStatus(streamActor, "error");
+    expect(isFailureSnapshot(streamSnapshot)).toBe(true);
+    if (!isFailureSnapshot<"stream failed">(streamSnapshot)) {
+      throw new Error("Expected Stream failure snapshot");
+    }
+    expect(failureCause(streamSnapshot)).toEqual(Cause.fail("stream failed"));
+    expect(failureValue(streamSnapshot)).toBe("stream failed");
+
+    const atomDefect = new Error("atom failed");
+    const atomActor = createActor(
+      fromAtom({
+        atom: Atom.make(() => {
+          throw atomDefect;
+        }),
+      })
+    );
+    atomActor.subscribe({ error: () => {} });
+    atomActor.start();
+
+    const atomSnapshot = atomActor.getSnapshot();
+    expect(isFailureSnapshot(atomSnapshot)).toBe(true);
+    if (!isFailureSnapshot(atomSnapshot)) {
+      throw new Error("Expected Atom failure snapshot");
+    }
+    expect(Cause.hasDies(failureCause(atomSnapshot))).toBe(true);
+    expect(failureValue(atomSnapshot)).toBeUndefined();
+
+    effectActor.stop();
+    streamActor.stop();
+    atomActor.stop();
   });
 });
 

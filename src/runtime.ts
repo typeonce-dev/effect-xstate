@@ -15,9 +15,9 @@ import {
   type ActorAtomRuntimeConfig,
   type ActorAtomOptions,
   type RuntimeActorAtom,
-} from "./actor-atom";
-import { registerActorSystemRuntimeContext } from "./actor-system-runtime";
-import type { RuntimeConstraint } from "./internal";
+} from "./atoms";
+import { registerActorSystemRuntimeContext } from "./runtime-context";
+import type { RuntimeConstraint } from "./types";
 
 export type RuntimeActorAtomConfig<
   TLogic extends AnyActorLogic,

@@ -2,6 +2,10 @@ import type { Context } from "effect";
 import type { AsyncResult } from "effect/unstable/reactivity";
 import type { AnyActorLogic, StateMachine } from "xstate";
 
+export type EffectStopEvent = {
+  readonly type: "xstate.stop";
+};
+
 export declare const RuntimeRequirementsTypeId: unique symbol;
 
 export interface RuntimeRequirements<R, ER> {

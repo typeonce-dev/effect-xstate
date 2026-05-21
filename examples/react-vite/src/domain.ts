@@ -87,7 +87,8 @@ export const checkoutMachine = setup({
     onSnapshot: {
       target: ".editing",
       actions: assign({
-        quantity: ({ event }) => event.snapshot.context,
+        quantity: ({ context, event }) =>
+          event.snapshot.context ?? context.quantity,
         quote: null,
       }),
     },

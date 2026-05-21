@@ -1,6 +1,6 @@
 import { Cause, Context, Exit } from "effect";
 import type { AnyActorScope } from "xstate";
-import type { RuntimeContextResult } from "./internal";
+import type { RuntimeContextResult } from "./types";
 
 type RuntimeContextBridge = {
   readonly get: () => RuntimeContextResult<unknown, unknown>;

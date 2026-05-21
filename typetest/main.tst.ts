@@ -13,11 +13,16 @@ import {
   emittedAtom,
   type EffectActorEvent,
   type EffectActorSnapshot,
+  type FailureSnapshot,
+  failureCause,
+  failureValue,
   fromAtom,
   type AtomActorEvent,
   type AtomActorSnapshot,
   fromEffect,
   fromStream,
+  isFailureSnapshot,
+  prettyCause,
   runtime as xstateRuntime,
   type StreamActorEvent,
   type StreamActorSnapshot,
@@ -377,5 +382,19 @@ describe("exported event and snapshot types", () => {
         { readonly status: "error" }
       >["error"]
     >().type.toBe<Cause.Cause<"boom">>();
+  });
+
+  it("exposes shared failure helpers for all Cause-backed snapshots", () => {
+    const snapshot = {
+      status: "error",
+      output: undefined,
+      error: Cause.fail("boom" as const),
+    } as FailureSnapshot<"boom">;
+
+    expect<FailureSnapshot<"boom">["error"]>().type.toBe<Cause.Cause<"boom">>();
+    expect(isFailureSnapshot).type.toBeCallableWith(snapshot);
+    expect(failureCause(snapshot)).type.toBe<Cause.Cause<"boom">>();
+    expect(failureValue(snapshot)).type.toBe<"boom" | undefined>();
+    expect(prettyCause).type.toBeCallableWith(Cause.fail("boom" as const));
   });
 });

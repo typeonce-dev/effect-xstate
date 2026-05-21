@@ -43,7 +43,7 @@ invokes service-backed `fromEffect` or `fromStream` logic must be created from a
 compatible `runtime.actorAtom(...)`, or from `runtime.createActor(...)` for
 standalone XState usage.
 
-Effect failures are exposed as typed `Cause` values:
+Effect, Stream, and Atom actor failures are exposed as typed `Cause` values:
 
 ```ts
 const snapshot = actor.getSnapshot();
