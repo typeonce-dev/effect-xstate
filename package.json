@@ -36,7 +36,6 @@
   ],
   "publishConfig": {
     "access": "public",
-    "provenance": true,
     "exports": {
       "./package.json": "./package.json",
       ".": "./dist/main.js",
@@ -48,11 +47,12 @@
     "build": "tsc -b tsconfig.build.json && pnpm babel",
     "babel": "babel dist --plugins annotate-pure-calls --out-dir dist --source-maps",
     "check": "pnpm typecheck",
-    "check:release": "pnpm typecheck && pnpm test-types && pnpm test && pnpm build && npm_config_cache=.npm pnpm publish --dry-run --access public --no-git-checks",
-    "release": "pnpm check:release && npm_config_cache=.npm pnpm publish --access public --provenance",
+    "check:release": "pnpm typecheck && pnpm test-types && pnpm test:run && pnpm build && npm_config_cache=.npm pnpm publish --dry-run --access public --no-git-checks",
+    "release": "pnpm check:release && npm_config_cache=.npm pnpm publish --access public",
     "typecheck": "tsc --noEmit",
     "test-types": "tstyche",
     "test": "vitest",
+    "test:run": "vitest run",
     "coverage": "vitest --coverage",
     "lint:all": "NODE_OPTIONS='--experimental-strip-types' oxlint --deny-warnings",
     "lint:fix": "NODE_OPTIONS='--experimental-strip-types' oxlint --fix",
