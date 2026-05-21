@@ -26,7 +26,7 @@ import {
   runtime as xstateRuntime,
   type StreamActorEvent,
   type StreamActorSnapshot,
-} from "@effect/xstate";
+} from "@typeonce/effect-xstate";
 
 describe("fromEffect", () => {
   class PricingService extends Context.Service<

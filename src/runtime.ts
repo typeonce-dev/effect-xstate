@@ -24,9 +24,9 @@ import {
   type ActorAtomOptions,
   type RuntimeActorAtom,
   type SnapshotWithRuntimeError,
-} from "./atoms";
-import { registerActorSystemRuntimeContext } from "./runtime-context";
-import type { RuntimeConstraint } from "./types";
+} from "./atoms.ts";
+import { registerActorSystemRuntimeContext } from "./runtime-context.ts";
+import type { RuntimeConstraint } from "./types.ts";
 
 export type RuntimeActorAtomConfig<
   TLogic extends AnyActorLogic,

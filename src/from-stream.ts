@@ -12,8 +12,8 @@ import type {
 import {
   getActorSystemRuntimeResult,
   subscribeActorSystemRuntime,
-} from "./runtime-context";
-import type { EffectStopEvent, WithRuntimeRequirements } from "./types";
+} from "./runtime-context.ts";
+import type { EffectStopEvent, WithRuntimeRequirements } from "./types.ts";
 
 export type StreamNextEvent<A> = {
   readonly type: "stream.next";

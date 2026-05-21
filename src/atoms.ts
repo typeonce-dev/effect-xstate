@@ -17,13 +17,13 @@ import {
 import {
   registerActorSystemRegistry,
   withActorSystemRegistry,
-} from "./from-atom";
-import { registerActorSystemRuntimeContext } from "./runtime-context";
+} from "./from-atom.ts";
+import { registerActorSystemRuntimeContext } from "./runtime-context.ts";
 import type {
   NoRuntimeConstraint,
   RuntimeConstraint,
   RuntimeContextResult,
-} from "./types";
+} from "./types.ts";
 
 export type RuntimeAtom<R, ER> = Atom.Atom<RuntimeContextResult<R, ER>>;
 

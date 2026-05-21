@@ -1,4 +1,4 @@
-# @effect/xstate
+# @typeonce/effect-xstate
 
 Experimental bridge between Effect Atom and XState actors.
 
@@ -29,7 +29,7 @@ When invoked actors need Effect services, wrap an `Atom.runtime` once and create
 the actor atom from that runtime:
 
 ```ts
-import { runtime as xstateRuntime } from "@effect/xstate";
+import { runtime as xstateRuntime } from "@typeonce/effect-xstate";
 
 const runtime = xstateRuntime(Atom.runtime(PricingLive));
 

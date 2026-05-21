@@ -4,7 +4,7 @@ export {
   emittedAtom,
   persistedAtom,
   selectAtom,
-} from "./atoms";
+} from "./atoms.ts";
 export type {
   ActorAtom,
   ActorAtomConfig,
@@ -13,8 +13,8 @@ export type {
   RuntimeActorAtom,
   RuntimeAtom,
   SnapshotWithRuntimeError,
-} from "./atoms";
-export { fromAtom } from "./from-atom";
+} from "./atoms.ts";
+export { fromAtom } from "./from-atom.ts";
 export type {
   AtomActorEvent,
   AtomActorSnapshot,
@@ -22,31 +22,31 @@ export type {
   AtomSetEvent,
   AtomStopEvent,
   FromAtomConfig,
-} from "./from-atom";
+} from "./from-atom.ts";
 export {
   failureCause,
   failureValue,
   isFailureSnapshot,
   prettyCause,
-} from "./errors";
-export { fromEffect } from "./from-effect";
-export { fromStream } from "./from-stream";
-export { runtime } from "./runtime";
+} from "./errors.ts";
+export { fromEffect } from "./from-effect.ts";
+export { fromStream } from "./from-stream.ts";
+export { runtime } from "./runtime.ts";
 export type {
   EffectActorEvent,
   EffectActorSnapshot,
   FromEffectConfig,
-} from "./from-effect";
-export type { FailureSnapshot } from "./errors";
+} from "./from-effect.ts";
+export type { FailureSnapshot } from "./errors.ts";
 export type {
   FromStreamConfig,
   StreamActorEvent,
   StreamActorSnapshot,
   StreamAccumulationPolicy,
-} from "./from-stream";
-export type { EffectStopEvent } from "./types";
+} from "./from-stream.ts";
+export type { EffectStopEvent } from "./types.ts";
 export type {
   RuntimeActor,
   RuntimeActorAtomConfig,
   XStateRuntime,
-} from "./runtime";
+} from "./runtime.ts";
