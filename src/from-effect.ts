@@ -190,6 +190,7 @@ export const fromEffect = <
 > => {
   const fibers = new WeakMap<object, Fiber.Fiber<unknown, unknown>>();
   const runtimeSubscriptions = new WeakMap<object, () => void>();
+  const runtimeResolvedActors = new WeakSet<object>();
   const logic: ActorLogic<
     EffectActorSnapshot<A, E, TInput>,
     EffectActorEvent<A, E>,
@@ -229,6 +230,13 @@ export const fromEffect = <
         return;
       }
       const startFiber = (services: Context.Context<R>) => {
+        if (
+          runtimeResolvedActors.has(actorScope.self) ||
+          actorScope.self.getSnapshot().status !== "active"
+        ) {
+          return;
+        }
+        runtimeResolvedActors.add(actorScope.self);
         runtimeSubscriptions.get(actorScope.self)?.();
         runtimeSubscriptions.delete(actorScope.self);
         const fiber = Effect.runForkWith(services)(
@@ -256,6 +264,12 @@ export const fromEffect = <
         });
       };
       const startWhenRuntimeReady = () => {
+        if (
+          runtimeResolvedActors.has(actorScope.self) ||
+          actorScope.self.getSnapshot().status !== "active"
+        ) {
+          return;
+        }
         const result = getActorSystemRuntimeResult(actorScope.system);
         if (result === undefined) {
           startFiber(Context.empty() as Context.Context<R>);
@@ -266,6 +280,7 @@ export const fromEffect = <
           return;
         }
         if (result._tag === "Failure") {
+          runtimeResolvedActors.add(actorScope.self);
           runtimeSubscriptions.get(actorScope.self)?.();
           runtimeSubscriptions.delete(actorScope.self);
           relayIfActive(actorScope, {
@@ -281,6 +296,7 @@ export const fromEffect = <
         });
         if (unsubscribe !== undefined) {
           runtimeSubscriptions.set(actorScope.self, unsubscribe);
+          startWhenRuntimeReady();
         }
       }
     },

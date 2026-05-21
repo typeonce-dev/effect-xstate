@@ -16,6 +16,7 @@ import {
   runtime as xstateRuntime,
   selectAtom,
 } from "../src/main";
+import { registerActorSystemRuntimeContext } from "../src/runtime-context";
 
 const waitForStatus = async <S extends { readonly status: string }>(
   actor: { readonly getSnapshot: () => S },
@@ -279,6 +280,83 @@ describe("fromEffect", () => {
     unmount();
   });
 
+  it("turns delayed Atom runtime failures into Effect actor error snapshots", async () => {
+    const registry = AtomRegistry.make();
+    const runtimeAtom = Atom.make<
+      AsyncResult.AsyncResult<Context.Context<PricingService>, "runtime failed">
+    >(AsyncResult.initial(true));
+    const logic = fromEffect({
+      effect: () =>
+        Effect.gen(function* () {
+          const service = yield* PricingService;
+          return service.unitPrice;
+        }),
+    });
+    const actor = actorAtom({ logic, runtime: runtimeAtom });
+    const unmount = registry.mount(actor);
+
+    expect(registry.get(actor).status).toBe("active");
+
+    registry.set(
+      runtimeAtom,
+      AsyncResult.failure<Context.Context<PricingService>, "runtime failed">(
+        Cause.fail("runtime failed" as const)
+      )
+    );
+
+    await vi.waitFor(() => {
+      expect(registry.get(actor).status).toBe("error");
+    });
+    const snapshot = registry.get(actor);
+    if (snapshot.status !== "error") {
+      throw new Error("Expected error snapshot");
+    }
+    expect(snapshot.cause).toEqual(Cause.fail("runtime failed"));
+
+    unmount();
+  });
+
+  it("does not start an Effect actor after stop while runtime is initial", async () => {
+    let runtimeResult: AsyncResult.AsyncResult<
+      Context.Context<PricingService>,
+      never
+    > = AsyncResult.initial(true);
+    const listeners = new Set<() => void>();
+    const started = vi.fn();
+    const logic = fromEffect({
+      effect: () =>
+        Effect.sync(() => {
+          started();
+          return 1;
+        }),
+    });
+    const actor = createActor(logic);
+    const unregister = registerActorSystemRuntimeContext(actor.system, {
+      get: () => runtimeResult as any,
+      subscribe: (onChange) => {
+        listeners.add(onChange);
+        return () => {
+          listeners.delete(onChange);
+        };
+      },
+    });
+
+    actor.start();
+    expect(actor.getSnapshot().status).toBe("active");
+    actor.send({ type: "xstate.stop" });
+    expect(actor.getSnapshot().status).toBe("stopped");
+
+    runtimeResult = AsyncResult.success(
+      Context.make(PricingService, PricingService.of({ unitPrice: 22 }))
+    );
+    listeners.forEach((listener) => listener());
+    await Effect.runPromise(Effect.yieldNow);
+
+    expect(started).not.toHaveBeenCalled();
+    unregister();
+    actor.stop();
+  });
+
   it("creates standalone service-backed actors from an XState runtime", async () => {
     const runtime = xstateRuntime(
       Atom.runtime(
@@ -530,6 +608,85 @@ describe("fromStream", () => {
     });
 
     unmount();
+  });
+
+  it("turns delayed Atom runtime failures into Stream actor error snapshots", async () => {
+    const registry = AtomRegistry.make();
+    const runtimeAtom = Atom.make<
+      AsyncResult.AsyncResult<Context.Context<NumberSource>, "runtime failed">
+    >(AsyncResult.initial(true));
+    const logic = fromStream({
+      stream: () =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const source = yield* NumberSource;
+            return Stream.fromIterable(source.values);
+          })
+        ),
+    });
+    const actor = actorAtom({ logic, runtime: runtimeAtom });
+    const unmount = registry.mount(actor);
+
+    expect(registry.get(actor).status).toBe("active");
+
+    registry.set(
+      runtimeAtom,
+      AsyncResult.failure<Context.Context<NumberSource>, "runtime failed">(
+        Cause.fail("runtime failed" as const)
+      )
+    );
+
+    await vi.waitFor(() => {
+      expect(registry.get(actor).status).toBe("error");
+    });
+    const snapshot = registry.get(actor);
+    if (snapshot.status !== "error") {
+      throw new Error("Expected error snapshot");
+    }
+    expect(snapshot.cause).toEqual(Cause.fail("runtime failed"));
+
+    unmount();
+  });
+
+  it("does not start a Stream actor after stop while runtime is initial", async () => {
+    let runtimeResult: AsyncResult.AsyncResult<
+      Context.Context<NumberSource>,
+      never
+    > = AsyncResult.initial(true);
+    const listeners = new Set<() => void>();
+    const started = vi.fn();
+    const logic = fromStream({
+      stream: () =>
+        Stream.sync(() => {
+          started();
+          return 1;
+        }),
+    });
+    const actor = createActor(logic);
+    const unregister = registerActorSystemRuntimeContext(actor.system, {
+      get: () => runtimeResult as any,
+      subscribe: (onChange) => {
+        listeners.add(onChange);
+        return () => {
+          listeners.delete(onChange);
+        };
+      },
+    });
+
+    actor.start();
+    expect(actor.getSnapshot().status).toBe("active");
+    actor.send({ type: "xstate.stop" });
+    expect(actor.getSnapshot().status).toBe("stopped");
+
+    runtimeResult = AsyncResult.success(
+      Context.make(NumberSource, NumberSource.of({ values: [1] }))
+    );
+    listeners.forEach((listener) => listener());
+    await Effect.runPromise(Effect.yieldNow);
+
+    expect(started).not.toHaveBeenCalled();
+    unregister();
+    actor.stop();
   });
 });
 
