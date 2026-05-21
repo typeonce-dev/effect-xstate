@@ -401,6 +401,45 @@ describe("fromEffect", () => {
 
     actor.stop();
   });
+
+  it("cleans up standalone actors stopped before the Atom runtime is available", async () => {
+    let runtimeFinalized = false;
+    const started = vi.fn();
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.effect(
+          PricingService,
+          Effect.gen(function* () {
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                runtimeFinalized = true;
+              })
+            );
+            return yield* Effect.never;
+          })
+        )
+      )
+    );
+    const logic = fromEffect({
+      effect: () =>
+        Effect.sync(() => {
+          started();
+          return 1;
+        }),
+    });
+    const actor = runtime.createActor({ logic });
+
+    actor.start();
+    expect(actor.getSnapshot().status).toBe("active");
+
+    actor.stop();
+
+    await vi.waitFor(() => {
+      expect(runtimeFinalized).toBe(true);
+    });
+    expect(actor.getSnapshot().status).toBe("stopped");
+    expect(started).not.toHaveBeenCalled();
+  });
 });
 
 describe("fromStream", () => {
@@ -710,9 +749,83 @@ describe("fromStream", () => {
     unregister();
     actor.stop();
   });
+
+  it("creates standalone service-backed stream actors from an XState runtime", async () => {
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.succeed(NumberSource, NumberSource.of({ values: [8, 9] }))
+      )
+    );
+    const logic = fromStream({
+      stream: () =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const source = yield* NumberSource;
+            return Stream.fromIterable(source.values);
+          })
+        ),
+    });
+    const actor = runtime.createActor({ logic });
+
+    actor.start();
+
+    const snapshot = await waitForStatus(actor, "done");
+    expect(snapshot.output).toEqual([8, 9]);
+    expect(snapshot.count).toBe(2);
+
+    actor.stop();
+  });
+
+  it("runs machine-invoked stream actors from a standalone XState runtime", async () => {
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.succeed(NumberSource, NumberSource.of({ values: [2, 4, 6] }))
+      )
+    );
+    const machine = setup({
+      types: {
+        context: {} as { readonly values: ReadonlyArray<number> },
+      },
+      actors: {
+        numbers: fromStream({
+          stream: () =>
+            Stream.unwrap(
+              Effect.gen(function* () {
+                const source = yield* NumberSource;
+                return Stream.fromIterable(source.values);
+              })
+            ),
+        }),
+      },
+    }).createMachine({
+      context: { values: [] },
+      invoke: {
+        src: "numbers",
+        onDone: {
+          actions: assign({
+            values: ({ event }) => event.output,
+          }),
+        },
+      },
+    });
+    const actor = runtime.createActor({ logic: machine });
+
+    actor.start();
+
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().context.values).toEqual([2, 4, 6]);
+    });
+
+    actor.stop();
+  });
 });
 
 describe("fromAtom", () => {
+  class PricingService extends Context.Service<
+    PricingService,
+    { readonly unitPrice: number }
+  >()("test/AtomPricingService") {}
+
   it("uses the active actorAtom registry without explicitly passing it", async () => {
     const registry = AtomRegistry.make();
     const count = Atom.make(0);
@@ -733,6 +846,71 @@ describe("fromAtom", () => {
 
     expect(registry.get(count)).toBe(5);
     expect(registry.get(countActor).context).toBe(5);
+
+    unmount();
+  });
+
+  it("uses runtime-backed atoms from nested invoked actors", async () => {
+    const registry = AtomRegistry.make();
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.succeed(PricingService, PricingService.of({ unitPrice: 19 }))
+      )
+    );
+    const priceAtom = runtime.atom(
+      Effect.gen(function* () {
+        const pricing = yield* PricingService;
+        return pricing.unitPrice;
+      })
+    );
+    const childMachine = setup({
+      types: {
+        context: {} as { readonly price: number },
+      },
+      actors: {
+        price: fromAtom({ atom: priceAtom }),
+      },
+    }).createMachine({
+      context: { price: 0 },
+      invoke: {
+        src: "price",
+        onSnapshot: {
+          actions: assign({
+            price: ({ context, event }) =>
+              event.snapshot.context?._tag === "Success"
+                ? event.snapshot.context.value
+                : context.price,
+          }),
+        },
+      },
+    });
+    const parentMachine = setup({
+      types: {
+        context: {} as { readonly childPrice: number },
+      },
+      actors: {
+        child: childMachine,
+      },
+    }).createMachine({
+      context: { childPrice: 0 },
+      invoke: {
+        src: "child",
+        onSnapshot: {
+          actions: assign({
+            childPrice: ({ context, event }) =>
+              event.snapshot.status === "active"
+                ? event.snapshot.context.price
+                : context.childPrice,
+          }),
+        },
+      },
+    });
+    const parent = runtime.actorAtom({ logic: parentMachine });
+    const unmount = registry.mount(parent);
+
+    await vi.waitFor(() => {
+      expect(registry.get(parent).context.childPrice).toBe(19);
+    });
 
     unmount();
   });
@@ -993,6 +1171,27 @@ describe("fromAtom", () => {
       context: 0,
     });
     expect(registry.get(count)).toBe(0);
+  });
+
+  it("stops fromAtom actors when their owning registry is disposed", () => {
+    const registry = AtomRegistry.make();
+    const count = Atom.make(0);
+    const countActor = actorAtom({ logic: fromAtom({ atom: count }) });
+    const unmount = registry.mount(countActor);
+    const actor = registry.get(countActor.actor);
+
+    expect(actor.getSnapshot()).toMatchObject({
+      status: "active",
+      context: 0,
+    });
+
+    registry.dispose();
+
+    expect(actor.getSnapshot()).toMatchObject({
+      status: "stopped",
+      context: 0,
+    });
+    unmount();
   });
 });
 

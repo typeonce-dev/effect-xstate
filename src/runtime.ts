@@ -89,6 +89,24 @@ export type RuntimeActor<
 };
 
 export interface XStateRuntime<R, ER> extends Atom.AtomRuntime<R, ER> {
+  /**
+   * Creates a standalone XState actor backed by this Atom runtime.
+   *
+   * Invoked `fromEffect` and `fromStream` actors can use services from the
+   * Atom runtime, and error snapshots include failures from both the invoked
+   * actor logic and the Atom runtime layer.
+   *
+   * @example
+   * const runtime = xstateRuntime(Atom.runtime(Pricing.layer))
+   * const actor = runtime.createActor({
+   *   logic: fromEffect({
+   *     effect: () => Pricing.use((pricing) => pricing.quote)
+   *   })
+   * })
+   */
+  readonly createActor: <TLogic extends AnyActorLogic>(
+    config: XStateRuntimeActorConfig<TLogic, R>
+  ) => RuntimeActor<TLogic, ER>;
   readonly actorAtom: <TLogic extends AnyActorLogic>(
     config: {
       readonly logic: TLogic;
@@ -111,9 +129,6 @@ export interface XStateRuntime<R, ER> extends Atom.AtomRuntime<R, ER> {
         IsNotNever<RequiredActorOptionsKeys<TLogic>>
       >
   ) => Atom.Atom<Actor<TLogic>>;
-  readonly createActor: <TLogic extends AnyActorLogic>(
-    config: XStateRuntimeActorConfig<TLogic, R>
-  ) => RuntimeActor<TLogic, ER>;
 }
 
 export const runtime = <R, ER>(
