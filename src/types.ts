@@ -1,6 +1,17 @@
 import type { Context } from "effect";
 import type { AsyncResult } from "effect/unstable/reactivity";
-import type { AnyActorLogic, StateMachine } from "xstate";
+import type {
+  AnyActorLogic,
+  AnyActorRef,
+  EventObject,
+  MachineContext,
+  MetaObject,
+  ParameterizedObject,
+  ProvidedActor,
+  StateMachine,
+  StateSchema,
+  StateValue,
+} from "xstate";
 
 export type EffectStopEvent = {
   readonly type: "xstate.stop";
@@ -26,20 +37,20 @@ export type RuntimeRequirementOf<TLogic> =
   TLogic extends RuntimeRequirements<infer R, infer ER>
     ? { readonly R: R; readonly ER: ER }
     : TLogic extends StateMachine<
-          any,
-          any,
-          any,
+          MachineContext,
+          EventObject,
+          Record<string, AnyActorRef | undefined>,
           infer TActor,
-          any,
-          any,
-          any,
-          any,
-          any,
-          any,
-          any,
-          any,
-          any,
-          any
+          ParameterizedObject,
+          ParameterizedObject,
+          string,
+          StateValue,
+          string,
+          unknown,
+          unknown,
+          EventObject,
+          MetaObject,
+          StateSchema
         >
       ? TActor extends { readonly logic: infer TChildLogic }
         ? RuntimeRequirementOf<TChildLogic>

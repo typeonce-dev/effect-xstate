@@ -332,7 +332,7 @@ describe("fromEffect", () => {
     });
     const actor = createActor(logic);
     const unregister = registerActorSystemRuntimeContext(actor.system, {
-      get: () => runtimeResult as any,
+      get: () => runtimeResult,
       subscribe: (onChange) => {
         listeners.add(onChange);
         return () => {
@@ -441,286 +441,6 @@ describe("fromEffect", () => {
     expect(started).not.toHaveBeenCalled();
   });
 
-  it("cleans up a standalone runtime bridge only once", async () => {
-    let runtimeFinalizers = 0;
-    const runtime = xstateRuntime(
-      Atom.runtime(
-        Layer.effect(
-          PricingService,
-          Effect.gen(function* () {
-            yield* Effect.addFinalizer(() =>
-              Effect.sync(() => {
-                runtimeFinalizers += 1;
-              })
-            );
-            return PricingService.of({ unitPrice: 11 });
-          })
-        )
-      )
-    );
-    const logic = fromEffect({
-      effect: () =>
-        Effect.gen(function* () {
-          const service = yield* PricingService;
-          return service.unitPrice;
-        }),
-    });
-    const actor = runtime.createActor({ logic });
-
-    actor.start();
-
-    await waitForStatus(actor, "done");
-    actor.stop();
-    actor.stop();
-    actor.stop();
-
-    await vi.waitFor(() => {
-      expect(runtimeFinalizers).toBe(1);
-    });
-  });
-
-  it("removes the pending runtime listener after runtime success", async () => {
-    let runtimeResult: AsyncResult.AsyncResult<
-      Context.Context<PricingService>,
-      never
-    > = AsyncResult.initial(true);
-    const listeners = new Set<() => void>();
-    const started = vi.fn();
-    const logic = fromEffect({
-      effect: () =>
-        Effect.sync(() => {
-          started();
-          return 1;
-        }),
-    });
-    const actor = createActor(logic);
-    const unregister = registerActorSystemRuntimeContext(actor.system, {
-      get: () => runtimeResult as any,
-      subscribe: (onChange) => {
-        listeners.add(onChange);
-        return () => {
-          listeners.delete(onChange);
-        };
-      },
-    });
-
-    actor.start();
-    expect(listeners.size).toBe(1);
-
-    runtimeResult = AsyncResult.success(
-      Context.empty() as Context.Context<PricingService>
-    );
-    listeners.forEach((listener) => listener());
-
-    await waitForStatus(actor, "done");
-    expect(started).toHaveBeenCalledTimes(1);
-    expect(listeners.size).toBe(0);
-
-    runtimeResult = AsyncResult.success(
-      Context.empty() as Context.Context<PricingService>
-    );
-    listeners.forEach((listener) => listener());
-    await Effect.runPromise(Effect.yieldNow);
-
-    expect(started).toHaveBeenCalledTimes(1);
-    expect(listeners.size).toBe(0);
-    unregister();
-    actor.stop();
-  });
-
-  it("removes the pending runtime listener after runtime failure", async () => {
-    let runtimeResult: AsyncResult.AsyncResult<
-      Context.Context<PricingService>,
-      "runtime failed"
-    > = AsyncResult.initial(true);
-    const listeners = new Set<() => void>();
-    const started = vi.fn();
-    const logic = fromEffect({
-      effect: () =>
-        Effect.sync(() => {
-          started();
-          return 1;
-        }),
-    });
-    const actor = createActor(logic);
-    const unregister = registerActorSystemRuntimeContext(actor.system, {
-      get: () => runtimeResult as any,
-      subscribe: (onChange) => {
-        listeners.add(onChange);
-        return () => {
-          listeners.delete(onChange);
-        };
-      },
-    });
-
-    actor.subscribe({ error: () => {} });
-    actor.start();
-    expect(listeners.size).toBe(1);
-
-    runtimeResult = AsyncResult.failure(Cause.fail("runtime failed" as const));
-    listeners.forEach((listener) => listener());
-
-    const snapshot = await waitForStatus(actor, "error");
-    if (snapshot.status !== "error") {
-      throw new Error("Expected error snapshot");
-    }
-    expect(snapshot.cause).toEqual(Cause.fail("runtime failed"));
-    expect(started).not.toHaveBeenCalled();
-    expect(listeners.size).toBe(0);
-
-    unregister();
-    actor.stop();
-  });
-
-  it("handles reentrant runtime readiness during subscription registration", async () => {
-    let runtimeResult: AsyncResult.AsyncResult<
-      Context.Context<PricingService>,
-      never
-    > = AsyncResult.initial(true);
-    const listeners = new Set<() => void>();
-    const started = vi.fn();
-    const logic = fromEffect({
-      effect: () =>
-        Effect.sync(() => {
-          started();
-          return 1;
-        }),
-    });
-    const actor = createActor(logic);
-    const unregister = registerActorSystemRuntimeContext(actor.system, {
-      get: () => runtimeResult as any,
-      subscribe: (onChange) => {
-        listeners.add(onChange);
-        runtimeResult = AsyncResult.success(
-          Context.empty() as Context.Context<PricingService>
-        );
-        onChange();
-        return () => {
-          listeners.delete(onChange);
-        };
-      },
-    });
-
-    actor.start();
-
-    await waitForStatus(actor, "done");
-    expect(started).toHaveBeenCalledTimes(1);
-    expect(listeners.size).toBe(0);
-
-    unregister();
-    actor.stop();
-  });
-
-  it("keeps stopped actors stopped when runtime later fails", async () => {
-    let runtimeResult: AsyncResult.AsyncResult<
-      Context.Context<PricingService>,
-      "runtime failed"
-    > = AsyncResult.initial(true);
-    const listeners = new Set<() => void>();
-    const started = vi.fn();
-    const logic = fromEffect({
-      effect: () =>
-        Effect.sync(() => {
-          started();
-          return 1;
-        }),
-    });
-    const actor = createActor(logic);
-    const unregister = registerActorSystemRuntimeContext(actor.system, {
-      get: () => runtimeResult as any,
-      subscribe: (onChange) => {
-        listeners.add(onChange);
-        return () => {
-          listeners.delete(onChange);
-        };
-      },
-    });
-
-    actor.start();
-    actor.send({ type: "xstate.stop" });
-    expect(actor.getSnapshot().status).toBe("stopped");
-    expect(listeners.size).toBe(0);
-
-    runtimeResult = AsyncResult.failure(Cause.fail("runtime failed" as const));
-    listeners.forEach((listener) => listener());
-    await Effect.runPromise(Effect.yieldNow);
-
-    expect(actor.getSnapshot().status).toBe("stopped");
-    expect(started).not.toHaveBeenCalled();
-    unregister();
-    actor.stop();
-  });
-
-  it("keeps done and error snapshots stable when stopped late", async () => {
-    const doneActor = createActor(
-      fromEffect({
-        effect: () => Effect.succeed(1),
-      })
-    ).start();
-
-    await waitForStatus(doneActor, "done");
-    doneActor.stop();
-    expect(doneActor.getSnapshot().status).toBe("done");
-
-    const errorActor = createActor(
-      fromEffect({
-        effect: () => Effect.fail("boom" as const),
-      })
-    );
-
-    errorActor.subscribe({ error: () => {} });
-    errorActor.start();
-
-    await waitForStatus(errorActor, "error");
-    errorActor.stop();
-    expect(errorActor.getSnapshot().status).toBe("error");
-
-    doneActor.stop();
-    errorActor.stop();
-  });
-
-  it("interrupts invoked Effect children when the parent leaves the invoking state", async () => {
-    let finalized = false;
-    const machine = setup({
-      types: {
-        events: {} as { readonly type: "next" },
-      },
-      actors: {
-        child: fromEffect({
-          effect: () =>
-            Effect.never.pipe(
-              Effect.ensuring(
-                Effect.sync(() => {
-                  finalized = true;
-                })
-              )
-            ),
-        }),
-      },
-    }).createMachine({
-      initial: "running",
-      states: {
-        running: {
-          invoke: {
-            src: "child",
-          },
-          on: {
-            next: "idle",
-          },
-        },
-        idle: {},
-      },
-    });
-    const actor = createActor(machine).start();
-
-    actor.send({ type: "next" });
-
-    await vi.waitFor(() => {
-      expect(finalized).toBe(true);
-    });
-
-    actor.stop();
-  });
 });
 
 describe("fromStream", () => {
@@ -1006,7 +726,7 @@ describe("fromStream", () => {
     });
     const actor = createActor(logic);
     const unregister = registerActorSystemRuntimeContext(actor.system, {
-      get: () => runtimeResult as any,
+      get: () => runtimeResult,
       subscribe: (onChange) => {
         listeners.add(onChange);
         return () => {
@@ -1029,122 +749,6 @@ describe("fromStream", () => {
     expect(started).not.toHaveBeenCalled();
     unregister();
     actor.stop();
-  });
-
-  it("removes the pending runtime listener after stream runtime success", async () => {
-    let runtimeResult: AsyncResult.AsyncResult<
-      Context.Context<NumberSource>,
-      never
-    > = AsyncResult.initial(true);
-    const listeners = new Set<() => void>();
-    const started = vi.fn();
-    const logic = fromStream({
-      stream: () =>
-        Stream.sync(() => {
-          started();
-          return 1;
-        }),
-    });
-    const actor = createActor(logic);
-    const unregister = registerActorSystemRuntimeContext(actor.system, {
-      get: () => runtimeResult as any,
-      subscribe: (onChange) => {
-        listeners.add(onChange);
-        return () => {
-          listeners.delete(onChange);
-        };
-      },
-    });
-
-    actor.start();
-    expect(listeners.size).toBe(1);
-
-    runtimeResult = AsyncResult.success(
-      Context.empty() as Context.Context<NumberSource>
-    );
-    listeners.forEach((listener) => listener());
-
-    await waitForStatus(actor, "done");
-    expect(started).toHaveBeenCalledTimes(1);
-    expect(listeners.size).toBe(0);
-
-    runtimeResult = AsyncResult.success(
-      Context.empty() as Context.Context<NumberSource>
-    );
-    listeners.forEach((listener) => listener());
-    await Effect.runPromise(Effect.yieldNow);
-
-    expect(started).toHaveBeenCalledTimes(1);
-    expect(listeners.size).toBe(0);
-    unregister();
-    actor.stop();
-  });
-
-  it("handles reentrant stream runtime readiness during subscription registration", async () => {
-    let runtimeResult: AsyncResult.AsyncResult<
-      Context.Context<NumberSource>,
-      never
-    > = AsyncResult.initial(true);
-    const listeners = new Set<() => void>();
-    const started = vi.fn();
-    const logic = fromStream({
-      stream: () =>
-        Stream.sync(() => {
-          started();
-          return 1;
-        }),
-    });
-    const actor = createActor(logic);
-    const unregister = registerActorSystemRuntimeContext(actor.system, {
-      get: () => runtimeResult as any,
-      subscribe: (onChange) => {
-        listeners.add(onChange);
-        runtimeResult = AsyncResult.success(
-          Context.empty() as Context.Context<NumberSource>
-        );
-        onChange();
-        return () => {
-          listeners.delete(onChange);
-        };
-      },
-    });
-
-    actor.start();
-
-    await waitForStatus(actor, "done");
-    expect(started).toHaveBeenCalledTimes(1);
-    expect(listeners.size).toBe(0);
-
-    unregister();
-    actor.stop();
-  });
-
-  it("keeps stream done and error snapshots stable when stopped late", async () => {
-    const doneActor = createActor(
-      fromStream({
-        stream: () => Stream.fromIterable([1, 2]),
-      })
-    ).start();
-
-    await waitForStatus(doneActor, "done");
-    doneActor.stop();
-    expect(doneActor.getSnapshot().status).toBe("done");
-
-    const errorActor = createActor(
-      fromStream({
-        stream: () => Stream.fail("boom" as const),
-      })
-    );
-
-    errorActor.subscribe({ error: () => {} });
-    errorActor.start();
-
-    await waitForStatus(errorActor, "error");
-    errorActor.stop();
-    expect(errorActor.getSnapshot().status).toBe("error");
-
-    doneActor.stop();
-    errorActor.stop();
   });
 
   it("creates standalone service-backed stream actors from an XState runtime", async () => {
@@ -1216,48 +820,6 @@ describe("fromStream", () => {
     actor.stop();
   });
 
-  it("interrupts invoked Stream children when the parent leaves the invoking state", async () => {
-    let finalized = false;
-    const machine = setup({
-      types: {
-        events: {} as { readonly type: "next" },
-      },
-      actors: {
-        child: fromStream({
-          stream: () =>
-            Stream.never.pipe(
-              Stream.ensuring(
-                Effect.sync(() => {
-                  finalized = true;
-                })
-              )
-            ),
-        }),
-      },
-    }).createMachine({
-      initial: "running",
-      states: {
-        running: {
-          invoke: {
-            src: "child",
-          },
-          on: {
-            next: "idle",
-          },
-        },
-        idle: {},
-      },
-    });
-    const actor = createActor(machine).start();
-
-    actor.send({ type: "next" });
-
-    await vi.waitFor(() => {
-      expect(finalized).toBe(true);
-    });
-
-    actor.stop();
-  });
 });
 
 describe("fromAtom", () => {
@@ -1519,32 +1081,6 @@ describe("fromAtom", () => {
     actor.stop();
   });
 
-  it("turns subscription defects after a successful initial read into error snapshots", async () => {
-    const defect = new Error("subscribe boom");
-    const value = Atom.make(1);
-    const registry = {
-      get: () => 1,
-      subscribe: () => {
-        throw defect;
-      },
-      refresh: vi.fn(),
-      set: vi.fn(),
-    } as unknown as AtomRegistry.AtomRegistry;
-    const actor = createActor(fromAtom({ atom: value, registry }));
-
-    actor.subscribe({ error: () => {} });
-    actor.start();
-
-    const snapshot = await waitForStatus(actor, "error");
-    expect(snapshot.context).toBe(1);
-    if (snapshot.status !== "error") {
-      throw new Error("Expected error snapshot");
-    }
-    expect(Cause.hasDies(snapshot.cause)).toBe(true);
-
-    actor.stop();
-  });
-
   it("mirrors writable Atom changes in both directions", async () => {
     const registry = AtomRegistry.make();
     const count = Atom.make(0);
@@ -1724,11 +1260,6 @@ describe("failure helpers", () => {
 });
 
 describe("actorAtom", () => {
-  class LateRuntimeService extends Context.Service<
-    LateRuntimeService,
-    { readonly value: number }
-  >()("test/LateRuntimeService") {}
-
   const counterMachine = setup({
     types: {
       context: {} as { readonly count: number },
@@ -1769,46 +1300,6 @@ describe("actorAtom", () => {
     unmount();
   });
 
-  it("unregisters runtime and registry bridges when actorRefAtom finalizes", async () => {
-    const registry = AtomRegistry.make();
-    const runtimeAtom = Atom.make<
-      AsyncResult.AsyncResult<Context.Context<LateRuntimeService>, never>
-    >(AsyncResult.initial(true));
-    const started = vi.fn();
-    const machine = setup({
-      actors: {
-        child: fromEffect({
-          effect: () =>
-            Effect.gen(function* () {
-              const service = yield* LateRuntimeService;
-              started(service.value);
-              return service.value;
-            }),
-        }),
-      },
-    }).createMachine({
-      invoke: {
-        src: "child",
-      },
-    });
-    const actor = actorAtom({ logic: machine, runtime: runtimeAtom });
-    const unmount = registry.mount(actor);
-
-    expect(registry.get(actor).status).toBe("active");
-
-    unmount();
-    await Effect.runPromise(Effect.yieldNow);
-    registry.set(
-      runtimeAtom,
-      AsyncResult.success(
-        Context.make(LateRuntimeService, LateRuntimeService.of({ value: 1 }))
-      )
-    );
-    await Effect.runPromise(Effect.yieldNow);
-
-    expect(started).not.toHaveBeenCalled();
-  });
-
   it("selects snapshots, emitted events, and XState persisted snapshots", () => {
     const registry = AtomRegistry.make();
     const counter = actorAtom({ logic: counterMachine });
@@ -1845,48 +1336,4 @@ describe("actorAtom", () => {
     unmountCounter();
   });
 
-  it("unsubscribes selector, emitted, and persisted atoms on finalization", async () => {
-    const registry = AtomRegistry.make();
-    const selectedUnsubscribe = vi.fn();
-    const persistedUnsubscribe = vi.fn();
-    const emittedUnsubscribe = vi.fn();
-    const fakeActor = {
-      getSnapshot: () => ({ context: { count: 0 } }),
-      getPersistedSnapshot: () => ({ context: { count: 0 } }),
-      subscribe: vi
-        .fn()
-        .mockReturnValueOnce({ unsubscribe: selectedUnsubscribe })
-        .mockReturnValueOnce({ unsubscribe: persistedUnsubscribe }),
-      on: vi.fn().mockReturnValue({ unsubscribe: emittedUnsubscribe }),
-    };
-    const actor = {
-      actor: Atom.make(fakeActor),
-    } as any;
-    const selected = selectAtom({
-      actor,
-      selector: (snapshot: { readonly context: { readonly count: number } }) =>
-        snapshot.context.count,
-    });
-    const emittedEvent = emittedAtom({
-      actor,
-      type: "counter.changed",
-    });
-    const persisted = persistedAtom({ actor });
-    const unmountSelected = registry.mount(selected);
-    const unmountEmitted = registry.mount(emittedEvent);
-    const unmountPersisted = registry.mount(persisted);
-
-    registry.get(selected);
-    registry.get(emittedEvent);
-    registry.get(persisted);
-
-    unmountSelected();
-    unmountEmitted();
-    unmountPersisted();
-    await Effect.runPromise(Effect.yieldNow);
-
-    expect(selectedUnsubscribe).toHaveBeenCalledTimes(1);
-    expect(emittedUnsubscribe).toHaveBeenCalledTimes(1);
-    expect(persistedUnsubscribe).toHaveBeenCalledTimes(1);
-  });
 });

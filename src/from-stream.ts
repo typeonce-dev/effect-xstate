@@ -9,10 +9,7 @@ import type {
   EventObject,
   Snapshot,
 } from "xstate";
-import {
-  getActorSystemRuntimeResult,
-  subscribeActorSystemRuntime,
-} from "./runtime-context.ts";
+import { waitForActorSystemRuntime } from "./runtime-context.ts";
 import type { EffectStopEvent, WithRuntimeRequirements } from "./types.ts";
 
 export type StreamNextEvent<A> = {
@@ -339,20 +336,15 @@ export const fromStream = <
         return;
       }
       const startFiber = (services: Context.Context<R>) => {
-        if (
-          runtimeResolvedActors.has(actorScope.self) ||
-          actorScope.self.getSnapshot().status !== "active"
-        ) {
-          return;
-        }
-        runtimeResolvedActors.add(actorScope.self);
-        runtimeSubscriptions.get(actorScope.self)?.();
-        runtimeSubscriptions.delete(actorScope.self);
         const fiber = Effect.runForkWith(services)(
           Stream.suspend(() =>
             config.stream({
               input: snapshot.input,
-              emit: actorScope.emit,
+              emit: (event) => {
+                if (actorScope.self.getSnapshot().status === "active") {
+                  actorScope.emit(event);
+                }
+              },
             })
           ).pipe(
             Stream.runForEach((value) =>
@@ -380,49 +372,18 @@ export const fromStream = <
           }
         });
       };
-      const startWhenRuntimeReady = () => {
-        if (
-          runtimeResolvedActors.has(actorScope.self) ||
-          actorScope.self.getSnapshot().status !== "active"
-        ) {
-          return;
-        }
-        const result = getActorSystemRuntimeResult(actorScope.system);
-        if (result === undefined) {
-          startFiber(Context.empty() as Context.Context<R>);
-          return;
-        }
-        if (result._tag === "Success") {
-          startFiber(result.value as Context.Context<R>);
-          return;
-        }
-        if (result._tag === "Failure") {
-          runtimeResolvedActors.add(actorScope.self);
-          runtimeSubscriptions.get(actorScope.self)?.();
-          runtimeSubscriptions.delete(actorScope.self);
+      waitForActorSystemRuntime({
+        actorScope,
+        runtimeSubscriptions,
+        runtimeResolvedActors,
+        start: startFiber,
+        fail: (cause) => {
           relayIfActive(actorScope, {
             type: "stream.failure",
-            cause: result.cause,
+            cause,
           });
-        }
-      };
-      startWhenRuntimeReady();
-      if (getActorSystemRuntimeResult(actorScope.system)?._tag === "Initial") {
-        const unsubscribe = subscribeActorSystemRuntime(actorScope.system, () => {
-          startWhenRuntimeReady();
-        });
-        if (unsubscribe !== undefined) {
-          if (
-            runtimeResolvedActors.has(actorScope.self) ||
-            actorScope.self.getSnapshot().status !== "active"
-          ) {
-            unsubscribe();
-          } else {
-            runtimeSubscriptions.set(actorScope.self, unsubscribe);
-            startWhenRuntimeReady();
-          }
-        }
-      }
+        },
+      });
     },
     getPersistedSnapshot: (snapshot) => snapshot,
   };

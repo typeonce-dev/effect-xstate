@@ -76,7 +76,9 @@ export const registerActorSystemRegistry = (
 ): (() => void) => {
   registryBySystem.set(system, registry);
   return () => {
-    registryBySystem.delete(system);
+    if (registryBySystem.get(system) === registry) {
+      registryBySystem.delete(system);
+    }
   };
 };
 

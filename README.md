@@ -199,6 +199,29 @@ const standaloneActor = appRuntime.createActor({
 });
 ```
 
+## Lifecycle Guarantees
+
+The runtime and Atom bridges are scoped to the active XState actor system and
+Atom registry. They are intentionally internal, but the public APIs preserve
+these lifecycle guarantees:
+
+- Runtime-backed `fromEffect` and `fromStream` actors start their Effect fiber at
+  most once, even if runtime readiness is reported multiple times.
+- Actors waiting for an Atom runtime remove their pending runtime listener after
+  the runtime resolves to success or failure.
+- Stopped actors ignore late runtime readiness, late Effect or Stream results,
+  and late emitted side-channel events.
+- Leaving a parent machine state stops invoked `fromEffect` and `fromStream`
+  children and interrupts their running Effect fibers.
+- `actorAtom` and `actorRefAtom` tie actor lifetime to the active
+  `AtomRegistry`; finalization stops the actor and unregisters its runtime and
+  registry bridges.
+- Calling `actor.stop()` after an actor has already reached `done` or `error`
+  leaves the final XState snapshot stable.
+- Overlapping internal runtime or registry bridge registrations are
+  ownership-safe: unregistering an older bridge does not remove a newer bridge
+  for the same actor system.
+
 ## Invoking Streams
 
 Use `fromStream` for long-running or multi-value Effect Streams. Stream snapshots

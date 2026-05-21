@@ -26,7 +26,7 @@ import {
   type SnapshotWithRuntimeError,
 } from "./atoms.ts";
 import { registerActorSystemRuntimeContext } from "./runtime-context.ts";
-import type { RuntimeConstraint } from "./types.ts";
+import type { RuntimeConstraint, RuntimeContextResult } from "./types.ts";
 
 export type RuntimeActorAtomConfig<
   TLogic extends AnyActorLogic,
@@ -162,7 +162,7 @@ export const runtime = <R, ER>(
       const unmount = registry.mount(atomRuntime);
       const actor = createActor(config.logic, config.options);
       const unregister = registerActorSystemRuntimeContext(actor.system, {
-        get: () => registry.get(atomRuntime) as any,
+        get: () => registry.get(atomRuntime) as RuntimeContextResult<R, ER>,
         subscribe: (onChange) => registry.subscribe(atomRuntime, onChange),
       });
       let closed = false;

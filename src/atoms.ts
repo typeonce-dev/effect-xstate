@@ -110,7 +110,9 @@ export function actorRefAtom<TLogic extends AnyActorLogic, R, ER>(
   config: ActorAtomRuntimeConfig<TLogic, R, ER>
 ): Atom.Atom<Actor<TLogic>>;
 export function actorRefAtom<TLogic extends AnyActorLogic>(
-  config: ActorAtomConfig<TLogic> | ActorAtomRuntimeConfig<TLogic, any, any>
+  config:
+    | ActorAtomConfig<TLogic>
+    | ActorAtomRuntimeConfig<TLogic, unknown, unknown>
 ): Atom.Atom<Actor<TLogic>> {
   return Atom.make((get) => {
     const actor = withActorSystemRegistry(get.registry, () =>
@@ -162,8 +164,10 @@ export function actorAtom<TLogic extends AnyActorLogic, R, ER>(
   config: ActorAtomRuntimeConfig<TLogic, R, ER>
 ): RuntimeActorAtom<TLogic, ER>;
 export function actorAtom<TLogic extends AnyActorLogic>(
-  config: ActorAtomConfig<TLogic> | ActorAtomRuntimeConfig<TLogic, any, any>
-): ActorAtom<TLogic> | RuntimeActorAtom<TLogic, any> {
+  config:
+    | ActorAtomConfig<TLogic>
+    | ActorAtomRuntimeConfig<TLogic, unknown, unknown>
+): ActorAtom<TLogic> | RuntimeActorAtom<TLogic, unknown> {
   const actor = actorRefAtom(config);
   const snapshot = Atom.writable<SnapshotFrom<TLogic>, EventFromLogic<TLogic>>(
     (get) => {
