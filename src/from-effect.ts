@@ -295,8 +295,15 @@ export const fromEffect = <
           startWhenRuntimeReady();
         });
         if (unsubscribe !== undefined) {
-          runtimeSubscriptions.set(actorScope.self, unsubscribe);
-          startWhenRuntimeReady();
+          if (
+            runtimeResolvedActors.has(actorScope.self) ||
+            actorScope.self.getSnapshot().status !== "active"
+          ) {
+            unsubscribe();
+          } else {
+            runtimeSubscriptions.set(actorScope.self, unsubscribe);
+            startWhenRuntimeReady();
+          }
         }
       }
     },

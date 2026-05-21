@@ -7,6 +7,11 @@ export type AtomChangedEvent<A> = {
   readonly value: A;
 };
 
+type AtomSubscriptionFailedEvent = {
+  readonly type: "atom.subscription.failed";
+  readonly cause: Cause.Cause<unknown>;
+};
+
 export type AtomRefreshEvent = {
   readonly type: "atom.refresh";
 };
@@ -26,6 +31,9 @@ export type AtomActorEvent<A, W = never> =
   | AtomStopEvent;
 
 type AtomInternalEvent<A, W> = AtomChangedEvent<A> | AtomActorEvent<A, W>;
+type AtomTransitionEvent<A, W> =
+  | AtomInternalEvent<A, W>
+  | AtomSubscriptionFailedEvent;
 
 export type AtomActorSnapshot<A> =
   | {
@@ -161,12 +169,18 @@ export function fromAtom<A, W = never>(
     getFallbackRegistry();
 
   return {
-    transition: (snapshot, event: AtomInternalEvent<A, W>, actorScope) => {
+    transition: (snapshot, event: AtomTransitionEvent<A, W>, actorScope) => {
       if (event.type === "atom.changed") {
         if (snapshot.status !== "active") {
           return snapshot;
         }
         return active<A>(event.value);
+      }
+      if (event.type === "atom.subscription.failed") {
+        if (snapshot.status !== "active") {
+          return snapshot;
+        }
+        return failed<A>(snapshot.context, event.cause);
       }
       if (event.type === "atom.refresh") {
         if (snapshot.status !== "active") {
@@ -228,6 +242,15 @@ export function fromAtom<A, W = never>(
       );
       if (unsubscribe._tag === "Success") {
         subscriptions.set(actorScope.self, unsubscribe.value);
+      } else {
+        (
+          actorScope.self as unknown as {
+            send: (event: AtomSubscriptionFailedEvent) => void;
+          }
+        ).send({
+          type: "atom.subscription.failed",
+          cause: unsubscribe.cause,
+        });
       }
     },
     getPersistedSnapshot: (snapshot) => snapshot,
