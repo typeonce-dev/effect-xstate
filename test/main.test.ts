@@ -379,6 +379,28 @@ describe("fromEffect", () => {
 
     actor.stop();
   });
+
+  it("turns standalone Atom runtime failures into actor error snapshots", async () => {
+    const runtime = xstateRuntime(
+      Atom.runtime(
+        Layer.effectDiscard(Effect.fail("runtime failed" as const))
+      )
+    );
+    const logic = fromEffect({
+      effect: () => Effect.succeed(1),
+    });
+    const actor = runtime.createActor({ logic });
+
+    actor.start();
+
+    const snapshot = await waitForStatus(actor, "error");
+    if (snapshot.status !== "error") {
+      throw new Error("Expected error snapshot");
+    }
+    expect(snapshot.cause).toEqual(Cause.fail("runtime failed"));
+
+    actor.stop();
+  });
 });
 
 describe("fromStream", () => {

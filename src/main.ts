@@ -45,4 +45,8 @@ export type {
   StreamAccumulationPolicy,
 } from "./from-stream";
 export type { EffectStopEvent } from "./types";
-export type { RuntimeActorAtomConfig, XStateRuntime } from "./runtime";
+export type {
+  RuntimeActor,
+  RuntimeActorAtomConfig,
+  XStateRuntime,
+} from "./runtime";

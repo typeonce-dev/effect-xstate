@@ -146,6 +146,32 @@ describe("fromEffect", () => {
     >();
   });
 
+  it("includes Atom runtime failures in standalone runtime actor snapshots", () => {
+    const runtime = xstateRuntime(
+      Atom.runtime(Layer.effectDiscard(Effect.fail("runtime failed" as const)))
+    );
+    const logic = fromEffect({
+      effect: () => Effect.fail({ _tag: "PricingError" as const }),
+    });
+    const actor = runtime.createActor({ logic });
+
+    expect<
+      Extract<
+        ReturnType<typeof actor.getSnapshot>,
+        { readonly status: "error" }
+      >["error"]
+    >().type.toBe<
+      Cause.Cause<{ _tag: "PricingError" } | "runtime failed">
+    >();
+    actor.subscribe((snapshot) => {
+      if (snapshot.status === "error") {
+        expect(snapshot.cause).type.toBe<
+          Cause.Cause<{ _tag: "PricingError" } | "runtime failed">
+        >();
+      }
+    });
+  });
+
   it("propagates invoked Effect service requirements through machines", () => {
     const runtime = xstateRuntime(
       Atom.runtime(
@@ -275,6 +301,27 @@ describe("fromStream", () => {
     >();
     expect(runtime.actorAtom).type.toBeCallableWith({ logic });
     expect(actorAtom).type.not.toBeCallableWith({ logic });
+  });
+
+  it("includes Atom runtime failures in standalone runtime stream snapshots", () => {
+    const runtime = xstateRuntime(
+      Atom.runtime(Layer.effectDiscard(Effect.fail("runtime failed" as const)))
+    );
+    const logic = fromStream({
+      stream: () => Stream.fail("stream failed" as const),
+    });
+    const actor = runtime.createActor({ logic });
+
+    expect<
+      Extract<
+        ReturnType<typeof actor.getSnapshot>,
+        { readonly status: "error" }
+      >["error"]
+    >().type.toBe<Cause.Cause<"stream failed" | "runtime failed">>();
+    const status = actor.select((snapshot) => snapshot.status);
+    expect<ReturnType<typeof status.get>>().type.toBe<
+      "active" | "done" | "error" | "stopped"
+    >();
   });
 });
 

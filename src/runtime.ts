@@ -1,12 +1,20 @@
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 import type {
   Actor,
+  ActorRef,
   ActorOptions,
   AnyActorLogic,
   ConditionalRequired,
+  EmittedFrom,
+  EventFromLogic,
   InputFrom,
   IsNotNever,
+  Observer,
+  Readable,
   RequiredActorOptionsKeys,
+  Snapshot,
+  SnapshotFrom,
+  Subscription,
 } from "xstate";
 import { createActor } from "xstate";
 import {
@@ -15,6 +23,7 @@ import {
   type ActorAtomRuntimeConfig,
   type ActorAtomOptions,
   type RuntimeActorAtom,
+  type SnapshotWithRuntimeError,
 } from "./atoms";
 import { registerActorSystemRuntimeContext } from "./runtime-context";
 import type { RuntimeConstraint } from "./types";
@@ -47,6 +56,38 @@ export type XStateRuntimeActorConfig<
     IsNotNever<RequiredActorOptionsKeys<TLogic>>
   >;
 
+type RuntimeActorSnapshot<TLogic extends AnyActorLogic, ER> =
+  SnapshotWithRuntimeError<SnapshotFrom<TLogic>, ER> & Snapshot<unknown>;
+
+export type RuntimeActor<
+  TLogic extends AnyActorLogic,
+  ER,
+> = Omit<
+  Actor<TLogic>,
+  "getSnapshot" | "ref" | "select" | "start" | "stop" | "subscribe"
+> & {
+  readonly ref: ActorRef<
+    RuntimeActorSnapshot<TLogic, ER>,
+    EventFromLogic<TLogic>,
+    EmittedFrom<TLogic>
+  >;
+  readonly getSnapshot: () => RuntimeActorSnapshot<TLogic, ER>;
+  readonly select: <TSelected>(
+    selector: (snapshot: RuntimeActorSnapshot<TLogic, ER>) => TSelected,
+    equalityFn?: ((a: TSelected, b: TSelected) => boolean) | undefined
+  ) => Readable<TSelected>;
+  readonly start: () => RuntimeActor<TLogic, ER>;
+  readonly stop: () => RuntimeActor<TLogic, ER>;
+  subscribe(
+    observer: Observer<RuntimeActorSnapshot<TLogic, ER>>
+  ): Subscription;
+  subscribe(
+    nextListener?: (snapshot: RuntimeActorSnapshot<TLogic, ER>) => void,
+    errorListener?: ((error: unknown) => void) | undefined,
+    completeListener?: (() => void) | undefined
+  ): Subscription;
+};
+
 export interface XStateRuntime<R, ER> extends Atom.AtomRuntime<R, ER> {
   readonly actorAtom: <TLogic extends AnyActorLogic>(
     config: {
@@ -72,7 +113,7 @@ export interface XStateRuntime<R, ER> extends Atom.AtomRuntime<R, ER> {
   ) => Atom.Atom<Actor<TLogic>>;
   readonly createActor: <TLogic extends AnyActorLogic>(
     config: XStateRuntimeActorConfig<TLogic, R>
-  ) => Actor<TLogic>;
+  ) => RuntimeActor<TLogic, ER>;
 }
 
 export const runtime = <R, ER>(
@@ -128,6 +169,6 @@ export const runtime = <R, ER>(
         close();
         return actor;
       };
-      return actor;
+      return actor as RuntimeActor<TLogic, ER>;
     },
   });

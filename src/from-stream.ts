@@ -402,7 +402,7 @@ export const fromStream = <
           runtimeSubscriptions.delete(actorScope.self);
           relayIfActive(actorScope, {
             type: "stream.failure",
-            cause: result.cause as Cause.Cause<E>,
+            cause: result.cause,
           });
         }
       };

@@ -285,7 +285,7 @@ export const fromEffect = <
           runtimeSubscriptions.delete(actorScope.self);
           relayIfActive(actorScope, {
             type: "effect.failure",
-            cause: result.cause as Cause.Cause<E>,
+            cause: result.cause,
           });
         }
       };
